@@ -1,6 +1,12 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { maintainer } from './auth';
+import {
+  configuredGitHubOrg,
+  deleteChallengeRepository,
+  isGitHubAutomationConfigured,
+  provisionChallengeRepository,
+} from './github-repos';
 import { siteTrafficOverview } from './traffic';
 import { challenges, tasks } from './selects';
 import {
@@ -148,6 +154,10 @@ adminConsole.get('/api/admin/console/overview', async (c) => {
     allowlist,
     serverTime: iso(),
     origin: c.env.APP_ORIGIN,
+    githubAutomation: {
+      configured: isGitHubAutomationConfigured(c.env),
+      org: configuredGitHubOrg(c.env),
+    },
     summary: {
       challengesTotal: challengeList.length,
       activeChallenges: challengeList.filter((ch) => ch.status === 'Active').length,
@@ -334,4 +344,183 @@ adminConsole.patch('/api/admin/console/challenges/:id/progress', async (c) => {
     existing.id
   ).run();
   return c.json({ id: existing.id, updated: true });
+});
+
+function pickEnOrZh(rawJson: string): string {
+  try {
+    const parsed = JSON.parse(rawJson) as { en?: string; zh?: string } | Array<{ en?: string; zh?: string }>;
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => item.en || item.zh || '').filter(Boolean).join('\n');
+    }
+    return parsed.en || parsed.zh || '';
+  } catch {
+    return rawJson;
+  }
+}
+
+async function provisionOneChallenge(
+  c: Ctx,
+  challengeRow: {
+    id: string;
+    slug: string;
+    name: string;
+    summary_json: string;
+    ultimate_goal_json: string;
+    scoring_metric_json: string;
+    rules_json: string;
+    trusted_workflow_name: string;
+  },
+  overwriteFiles: boolean
+) {
+  const provisioned = await provisionChallengeRepository(c.env, {
+    slug: challengeRow.slug,
+    name: challengeRow.name,
+    summary: pickEnOrZh(challengeRow.summary_json),
+    goal: pickEnOrZh(challengeRow.ultimate_goal_json),
+    scoringMetric: pickEnOrZh(challengeRow.scoring_metric_json),
+    acceptanceCriteria: pickEnOrZh(challengeRow.rules_json) || 'Reproducible Pull Request passing trusted verifier.',
+    trustedCheckName: challengeRow.trusted_workflow_name || `${challengeRow.slug}-verifier-v1`,
+    allowExisting: true,
+    overwriteFiles,
+  });
+  await sql(
+    c.env.DB,
+    `UPDATE challenges SET github_repo_owner=?, github_repo_name=?, updated_at=${now} WHERE id=?`,
+    provisioned.owner,
+    provisioned.repo,
+    challengeRow.id
+  ).run();
+  return { id: challengeRow.id, slug: challengeRow.slug, ...provisioned };
+}
+
+adminConsole.post('/api/admin/console/challenges/:id/provision-repo', async (c) => {
+  assertAdminIp(c, true);
+  const cid = key.parse(c.req.param('id'));
+  let overwriteFiles = false;
+  try {
+    const body = (await c.req.json()) as { overwriteFiles?: boolean };
+    overwriteFiles = Boolean(body?.overwriteFiles);
+  } catch {
+    // empty body is fine
+  }
+  const ch = await sql(
+    c.env.DB,
+    `SELECT id, slug, name, summary_json, ultimate_goal_json, scoring_metric_json, rules_json, trusted_workflow_name
+     FROM challenges WHERE id=? OR slug=?`,
+    cid,
+    cid
+  ).first<{
+    id: string;
+    slug: string;
+    name: string;
+    summary_json: string;
+    ultimate_goal_json: string;
+    scoring_metric_json: string;
+    rules_json: string;
+    trusted_workflow_name: string;
+  }>();
+  if (!ch) fail(404, 'NOT_FOUND', 'Challenge not found.');
+  return c.json(await provisionOneChallenge(c, ch, overwriteFiles));
+});
+
+adminConsole.post('/api/admin/console/repos/provision-all', async (c) => {
+  assertAdminIp(c, true);
+  let overwriteFiles = false;
+  try {
+    const body = (await c.req.json()) as { overwriteFiles?: boolean };
+    overwriteFiles = Boolean(body?.overwriteFiles);
+  } catch {
+    // empty body is fine
+  }
+  const managedOrg = configuredGitHubOrg(c.env);
+  const rows = await sql(
+    c.env.DB,
+    `SELECT id, slug, name, summary_json, ultimate_goal_json, scoring_metric_json, rules_json, trusted_workflow_name
+     FROM challenges
+     WHERE lower(github_repo_owner) IN (lower(?), 'common-intelligence')
+     ORDER BY created_at ASC, slug ASC`,
+    managedOrg
+  ).all<{
+    id: string;
+    slug: string;
+    name: string;
+    summary_json: string;
+    ultimate_goal_json: string;
+    scoring_metric_json: string;
+    rules_json: string;
+    trusted_workflow_name: string;
+  }>();
+
+  const results = [];
+  for (const ch of rows.results) {
+    results.push(await provisionOneChallenge(c, ch, overwriteFiles));
+  }
+  return c.json({
+    org: configuredGitHubOrg(c.env),
+    total: results.length,
+    created: results.filter((r) => r.created).length,
+    synced: results.filter((r) => !r.created).length,
+    results,
+  });
+});
+
+adminConsole.delete('/api/admin/console/challenges/:id', async (c) => {
+  assertAdminIp(c, true);
+  const cid = key.parse(c.req.param('id'));
+  const deleteRepo = c.req.query('deleteRepo') === 'true';
+
+  const ch = await sql(
+    c.env.DB,
+    `SELECT id, slug, github_repo_owner, github_repo_name FROM challenges WHERE id=? OR slug=?`,
+    cid,
+    cid
+  ).first<{ id: string; slug: string; github_repo_owner: string; github_repo_name: string }>();
+  if (!ch) fail(404, 'NOT_FOUND', 'Challenge not found.');
+
+  const proofCounts = await sql(
+    c.env.DB,
+    `SELECT
+      (SELECT count(*) FROM contributions WHERE challenge_id=?) AS contributions,
+      (SELECT count(*) FROM credentials WHERE challenge_id=?) AS credentials,
+      (SELECT count(*) FROM user_badges WHERE challenge_id=?) AS badges`,
+    ch.id,
+    ch.id,
+    ch.id
+  ).first<{ contributions: number; credentials: number; badges: number }>();
+
+  const totalProofs =
+    Number(proofCounts?.contributions ?? 0) +
+    Number(proofCounts?.credentials ?? 0) +
+    Number(proofCounts?.badges ?? 0);
+  if (totalProofs > 0) {
+    fail(
+      409,
+      'CONFLICT',
+      'Cannot delete a challenge that already has permanent verified Proof of Contribution records; archive it instead.'
+    );
+  }
+
+  let repoDeletion: Awaited<ReturnType<typeof deleteChallengeRepository>> | null = null;
+  if (deleteRepo) {
+    repoDeletion = await deleteChallengeRepository(c.env, ch.github_repo_owner, ch.github_repo_name);
+  }
+
+  await c.env.DB.batch([
+    sql(
+      c.env.DB,
+      `UPDATE project_proposals
+       SET status='Rejected', rejection_reason='Challenge removed by administrator.', challenge_id=NULL
+       WHERE challenge_id=?`,
+      ch.id
+    ),
+    sql(c.env.DB, 'UPDATE tasks SET plan_id=NULL WHERE challenge_id=?', ch.id),
+    sql(c.env.DB, 'DELETE FROM challenges WHERE id=?', ch.id),
+  ]);
+
+  return c.json({
+    id: ch.id,
+    slug: ch.slug,
+    deleted: true,
+    repoDeletion,
+  });
 });

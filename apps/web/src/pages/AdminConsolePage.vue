@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { Challenge, ChallengeStatus, Task, TaskPriority, TaskStatus, TaskType } from '@common-intelligence/shared';
-import { Lock, Plus, RefreshCw, ShieldCheck, ExternalLink } from 'lucide-vue-next';
+import { Lock, Plus, RefreshCw, ShieldCheck, ExternalLink, Trash2, FolderGit2 } from 'lucide-vue-next';
 import StatusPill from '@/components/StatusPill.vue';
 import SiteTrafficPanel from '@/components/SiteTrafficPanel.vue';
 import { API_BASE_URL } from '@/api/client';
@@ -32,6 +32,10 @@ interface AdminOverview {
   allowlist: string[];
   serverTime: string;
   origin: string;
+  githubAutomation?: {
+    configured: boolean;
+    org: string;
+  };
   summary: {
     challengesTotal: number;
     activeChallenges: number;
@@ -179,6 +183,77 @@ async function updateChallengeStatus(challengeId: string, status: ChallengeStatu
     await loadOverview();
   } catch (err) {
     notify(err instanceof Error ? err.message : 'Update failed');
+  } finally {
+    busyKey.value = null;
+  }
+}
+
+async function provisionChallengeRepo(challengeId: string) {
+  busyKey.value = `repo:${challengeId}`;
+  try {
+    const res = await adminFetch<{ githubRepo: string; created: boolean; filesWritten: string[]; warnings: string[] }>(
+      `/api/admin/console/challenges/${encodeURIComponent(challengeId)}/provision-repo`,
+      { method: 'POST', body: JSON.stringify({ overwriteFiles: false }) }
+    );
+    const verb = res.created
+      ? (state.locale === 'zh' ? '已自动创建仓库' : 'Created repo')
+      : (state.locale === 'zh' ? '已同步仓库' : 'Synced repo');
+    notify(`${verb}: ${res.githubRepo} (+${res.filesWritten.length} files)`);
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Provision failed');
+  } finally {
+    busyKey.value = null;
+  }
+}
+
+async function provisionAllRepos() {
+  busyKey.value = 'repo:all';
+  try {
+    const res = await adminFetch<{ org: string; total: number; created: number; synced: number }>(
+      '/api/admin/console/repos/provision-all',
+      { method: 'POST', body: JSON.stringify({ overwriteFiles: false }) }
+    );
+    notify(
+      state.locale === 'zh'
+        ? `已在 ${res.org} 完成全部 ${res.total} 个仓库同步（新建 ${res.created}，同步 ${res.synced}）`
+        : `Provisioned ${res.total} repos under ${res.org} (${res.created} created, ${res.synced} synced)`
+    );
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Batch provision failed');
+  } finally {
+    busyKey.value = null;
+  }
+}
+
+async function deleteChallengeAndRepo(ch: Challenge) {
+  const managedOrg = overview.value?.githubAutomation?.org ?? 'common-intelligence-org';
+  const isManagedRepo = ch.githubRepo.toLowerCase().startsWith(`https://github.com/${managedOrg.toLowerCase()}/`);
+  const confirmMsg =
+    state.locale === 'zh'
+      ? `确定要删除项目「${challengeName(ch)}」(${ch.slug}) 吗？${
+          isManagedRepo ? `\n同时将自动删除 GitHub 仓库：${ch.githubRepo}` : '\n（外部仓库不会被删除，仅删除平台记录）'
+        }\n注意：已有正式贡献凭证的项目受保护不可删除。`
+      : `Delete challenge "${ch.name}" (${ch.slug})?${
+          isManagedRepo ? `\nThis will also delete GitHub repo: ${ch.githubRepo}` : '\n(External repo will NOT be deleted)'
+        }\nChallenges with verified Proof of Contribution records are protected.`;
+  if (!window.confirm(confirmMsg)) return;
+
+  busyKey.value = `del:${ch.id}`;
+  try {
+    const qs = isManagedRepo && overview.value?.githubAutomation?.configured ? '?deleteRepo=true' : '';
+    await adminFetch(`/api/admin/console/challenges/${encodeURIComponent(ch.id)}${qs}`, {
+      method: 'DELETE',
+    });
+    notify(
+      state.locale === 'zh'
+        ? `已删除项目 ${ch.slug}${qs ? ' 及其 GitHub 仓库' : ''}`
+        : `Deleted ${ch.slug}${qs ? ' and its GitHub repo' : ''}`
+    );
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Delete failed');
   } finally {
     busyKey.value = null;
   }
@@ -404,14 +479,50 @@ onMounted(loadOverview);
 
       <SiteTrafficPanel v-if="activeTab === 'traffic'" />
       <!-- Tab 1: Challenges -->
-      <section v-else-if="activeTab === 'challenges'" class="mt-6 overflow-x-auto rounded-lg border border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface">
+      <section v-else-if="activeTab === 'challenges'" class="mt-6 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-light bg-surface px-4 py-3 text-xs dark:border-border-dark dark:bg-obsidian-surface">
+          <div class="flex flex-wrap items-center gap-2">
+            <FolderGit2 class="h-4 w-4 text-accent dark:text-accent-dark" />
+            <span class="font-medium text-ink dark:text-chalk">
+              {{ state.locale === 'zh' ? 'GitHub 仓库自动化' : 'GitHub Repo Automation' }}
+            </span>
+            <span class="font-mono text-ink-muted dark:text-chalk-muted">
+              {{ overview.githubAutomation?.org ?? 'common-intelligence-org' }}
+            </span>
+            <StatusPill
+              :label="
+                overview.githubAutomation?.configured
+                  ? (state.locale === 'zh' ? 'Token 已就绪' : 'Token Configured')
+                  : (state.locale === 'zh' ? '未配置 GITHUB_ADMIN_TOKEN' : 'Missing GITHUB_ADMIN_TOKEN')
+              "
+              :tone="overview.githubAutomation?.configured ? 'accent' : 'neutral'"
+            />
+          </div>
+          <button
+            type="button"
+            :disabled="!overview.githubAutomation?.configured || busyKey === 'repo:all'"
+            class="inline-flex items-center gap-1.5 rounded bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:opacity-90 disabled:opacity-40 dark:bg-chalk dark:text-obsidian cursor-pointer"
+            @click="provisionAllRepos"
+          >
+            <FolderGit2 class="h-3.5 w-3.5" />
+            <span>
+              {{
+                busyKey === 'repo:all'
+                  ? (state.locale === 'zh' ? '正在同步…' : 'Provisioning…')
+                  : (state.locale === 'zh' ? '一键自动建仓 / 同步全部' : 'Provision / Sync All Repos')
+              }}
+            </span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto rounded-lg border border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface">
         <table class="w-full text-left text-xs">
           <thead class="border-b border-border-light bg-subtle/60 text-ink-muted dark:border-border-dark dark:bg-obsidian-subtle/60 dark:text-chalk-muted">
             <tr>
               <th class="px-4 py-3">{{ state.locale === 'zh' ? '项目名称' : 'Challenge' }}</th>
               <th class="px-4 py-3">{{ state.locale === 'zh' ? '状态' : 'Status' }}</th>
               <th class="px-4 py-3">{{ state.locale === 'zh' ? '任务（可领 / 运行 / 完成）' : 'Tasks (Open / Active / Done)' }}</th>
-              <th class="px-4 py-3 text-right">{{ state.locale === 'zh' ? '切换状态' : 'Change Status' }}</th>
+              <th class="px-4 py-3 text-right">{{ state.locale === 'zh' ? '仓库与状态操作' : 'Repo & Status Actions' }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border-light dark:divide-border-dark">
@@ -420,8 +531,17 @@ onMounted(loadOverview);
                 <RouterLink :to="`/challenges/${ch.slug}`" class="font-semibold text-accent hover:underline dark:text-accent-dark">
                   {{ challengeName(ch) }}
                 </RouterLink>
-                <div class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                  /{{ ch.slug }}
+                <div class="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+                  <span>/{{ ch.slug }}</span>
+                  <a
+                    :href="ch.githubRepo"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="inline-flex items-center gap-0.5 text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+                  >
+                    <span>{{ ch.githubRepo.replace('https://github.com/', '') }}</span>
+                    <ExternalLink class="h-3 w-3" />
+                  </a>
                 </div>
               </td>
               <td class="px-4 py-3">
@@ -435,20 +555,49 @@ onMounted(loadOverview);
                 {{ ch.stats.openTasksCount }} / {{ ch.stats.activeLeasesCount }} / {{ ch.stats.completedTasksCount }}
               </td>
               <td class="px-4 py-3 text-right">
-                <select
-                  :value="ch.status"
-                  :disabled="busyKey === `ch:${ch.id}`"
-                  class="rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-                  @change="updateChallengeStatus(ch.id, ($event.target as HTMLSelectElement).value as ChallengeStatus)"
-                >
-                  <option v-for="s in CHALLENGE_STATUSES" :key="s" :value="s">
-                    {{ challengeStatus(s) }}
-                  </option>
-                </select>
+                <div class="inline-flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    :disabled="!overview.githubAutomation?.configured || busyKey === `repo:${ch.id}`"
+                    class="rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink hover:border-ink/40 disabled:opacity-40 dark:border-border-dark dark:bg-obsidian dark:text-chalk cursor-pointer"
+                    @click="provisionChallengeRepo(ch.id)"
+                  >
+                    {{
+                      busyKey === `repo:${ch.id}`
+                        ? (state.locale === 'zh' ? '同步中…' : 'Syncing…')
+                        : (state.locale === 'zh' ? '建仓/同步' : 'Provision')
+                    }}
+                  </button>
+                  <select
+                    :value="ch.status"
+                    :disabled="busyKey === `ch:${ch.id}`"
+                    class="rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                    @change="updateChallengeStatus(ch.id, ($event.target as HTMLSelectElement).value as ChallengeStatus)"
+                  >
+                    <option v-for="s in CHALLENGE_STATUSES" :key="s" :value="s">
+                      {{ challengeStatus(s) }}
+                    </option>
+                  </select>
+                  <button
+                    type="button"
+                    :disabled="busyKey === `del:${ch.id}` || ch.stats.verifiedContributionsCount > 0"
+                    :title="
+                      ch.stats.verifiedContributionsCount > 0
+                        ? (state.locale === 'zh' ? '已有正式贡献凭证的项目不可删除' : 'Protected: has verified contributions')
+                        : (state.locale === 'zh' ? '删除项目及托管仓库' : 'Delete challenge and managed repo')
+                    "
+                    class="inline-flex items-center gap-1 rounded border border-red-700/30 bg-paper px-2 py-1 text-xs text-red-700 hover:bg-red-700/10 disabled:opacity-35 dark:border-red-400/30 dark:bg-obsidian dark:text-red-400 cursor-pointer"
+                    @click="deleteChallengeAndRepo(ch)"
+                  >
+                    <Trash2 class="h-3.5 w-3.5" />
+                    <span>{{ state.locale === 'zh' ? '删除' : 'Delete' }}</span>
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
+        </div>
       </section>
 
       <!-- Tab 2: Tasks -->

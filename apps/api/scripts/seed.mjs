@@ -23,7 +23,7 @@ export function catalogStatements() {
     scoreUnit: 'Elo',
     attribution: `${gmReport.engineName} v${gmReport.engineVersion} (${gmReport.matchSummary.wins}W-${gmReport.matchSummary.draws}D-${gmReport.matchSummary.losses}L vs ${gmReport.matchSummary.opponent})`,
     recordedAt: gmReport.executedAt.slice(0, 10),
-    sourceUrl: 'https://github.com/common-intelligence/grandmaster',
+    sourceUrl: 'https://github.com/common-intelligence-org/grandmaster',
     sourceLabel: `Phase 0 Measured Baseline (${gmReport.benchNps.toLocaleString()} NPS)`,
   };
   const gmBaselineHistory = gmReport.eloHistory.map((pt, idx) => ({

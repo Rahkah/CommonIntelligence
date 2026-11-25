@@ -191,8 +191,9 @@ export interface ProjectProposal extends ProjectBriefContent {
 
 export interface ApproveProjectProposalRequest {
   slug: string;
-  githubRepo: string;
-  trustedCheckName: string;
+  githubRepo?: string;
+  autoCreateRepo?: boolean;
+  trustedCheckName?: string;
   verificationMethod: string;
   targetDisplay: string;
   contributionType: ContributionType;

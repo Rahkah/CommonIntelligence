@@ -24,7 +24,7 @@ export const AI_CIVILIZATION_BRIEF = {
 } satisfies Record<Locale, CreateProjectProposalRequest>;
 
 const slug = 'ai-civilization';
-const repository = 'https://github.com/common-intelligence/ai-civilization';
+const repository = 'https://github.com/common-intelligence-org/ai-civilization';
 const { en, zh } = AI_CIVILIZATION_BRIEF;
 const acceptance = { en: en.acceptanceCriteria, zh: zh.acceptanceCriteria };
 

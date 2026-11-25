@@ -39,7 +39,7 @@ The receipt for a submitted PR remains tied to its head. If review leads to more
 ## Production configuration
 
 1. The `production` environment in `apps/api/wrangler.jsonc` binds the `common-intelligence` D1 database and serves both the frontend and API at `https://common-intelligence-api.common-intelligence.workers.dev`. The default environment is for local development.
-2. Register the production OAuth callback at `https://common-intelligence-api.common-intelligence.workers.dev/auth/github/callback`. Manage Worker secrets with `--env production`. From `apps/api`, apply migrations with `pnpm exec wrangler d1 migrations apply DB --env production --remote`.
+2. Register the production OAuth callback at `https://common-intelligence-api.common-intelligence.workers.dev/auth/github/callback`. Manage Worker secrets with `--env production` (`SESSION_SECRET`, `TOKEN_PEPPER`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_WEBHOOK_SECRET`, and `GITHUB_ADMIN_TOKEN` scoped to `GITHUB_ORG_NAME` for automated public repository creation/deletion). From `apps/api`, apply migrations with `pnpm exec wrangler d1 migrations apply DB --env production --remote`.
 3. Publish challenges using a maintainer session after bootstrap, or export the starter catalog SQL with `node scripts/seed.mjs --print` from `apps/api` and apply the reviewed SQL to the target database.
 4. From the root run `pnpm typecheck`, `pnpm test` and `pnpm build`. The build performs a Worker deployment dry run. Deploy from `apps/api` with `pnpm exec wrangler deploy --env production`.
 5. Check `/health`, complete a real OAuth login, and exercise a reviewed PR on the configured challenge repository. The automated suite exercises GitHub interactions using fixtures and a temporary local D1 database.

@@ -351,6 +351,7 @@ catalog.get('/challenges/:slug/join.txt', async (c) => {
     if (asset.ok && asset.headers.get('content-type')?.includes('text/plain')) {
       preamble = (await asset.text())
         .replaceAll('https://commonintelligence.org', c.env.APP_ORIGIN)
+        .replaceAll('https://github.com/common-intelligence-org/' + h.slug, h.githubRepo)
         .replaceAll('https://github.com/common-intelligence/' + h.slug, h.githubRepo);
     }
   }

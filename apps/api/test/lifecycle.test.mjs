@@ -7,6 +7,7 @@ import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { app, sweep } from '../src/index';
+import { setGitHubRepoFetch } from '../src/github-repos';
 import { catalogStatements } from '../scripts/seed.mjs';
 import { validateProjectBrief } from '@common-intelligence/shared';
 import { AI_CIVILIZATION_BRIEF } from '../../web/src/data/aiCivilization.ts';
@@ -867,5 +868,192 @@ it('tracks public page views and recent online activity for the protected admin 
     expect(stats.recentVisits).toHaveLength(2);
   } finally {
     env.ADMIN_IP_ALLOWLIST = previousAllowlist;
+  }
+}, 20000);
+
+it('automates public GitHub repo creation, ownership notice, webhook setup, batch sync, and safe deletion', async () => {
+  const externalCid = await challenge();
+  const repos = new Map();
+  const prevToken = env.GITHUB_ADMIN_TOKEN;
+  const prevOrg = env.GITHUB_ORG_NAME;
+  const prevOrigin = env.APP_ORIGIN;
+  const prevAllowlist = env.ADMIN_IP_ALLOWLIST;
+  env.GITHUB_ADMIN_TOKEN = 'ghp_test_automation_token';
+  env.GITHUB_ORG_NAME = 'common-intelligence-org';
+  env.APP_ORIGIN = 'https://common-intelligence-api.common-intelligence.workers.dev';
+  env.ADMIN_IP_ALLOWLIST = '141.11.146.88';
+
+  setGitHubRepoFetch(async (url, init = {}) => {
+    const method = (init.method || 'GET').toUpperCase();
+    const u = new URL(String(url));
+    const jsonRes = (status, data) =>
+      new Response(status === 204 ? null : JSON.stringify(data), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+
+    // POST /orgs/:org/repos
+    const createMatch = u.pathname.match(/^\/orgs\/([^/]+)\/repos$/);
+    if (method === 'POST' && createMatch) {
+      const org = decodeURIComponent(createMatch[1]);
+      const body = JSON.parse(String(init.body));
+      const full = `${org}/${body.name}`;
+      if (repos.has(full)) return jsonRes(422, { message: 'Repository creation failed: name already exists' });
+      repos.set(full, { ...body, files: new Map(), hooks: [] });
+      return jsonRes(201, { full_name: full, html_url: `https://github.com/${full}` });
+    }
+
+    // GET/DELETE /repos/:owner/:repo
+    const repoMatch = u.pathname.match(/^\/repos\/([^/]+)\/([^/]+)$/);
+    if (repoMatch) {
+      const full = `${decodeURIComponent(repoMatch[1])}/${decodeURIComponent(repoMatch[2])}`;
+      if (method === 'GET') {
+        return repos.has(full) ? jsonRes(200, { full_name: full }) : jsonRes(404, { message: 'Not Found' });
+      }
+      if (method === 'DELETE') {
+        if (!repos.has(full)) return jsonRes(404, { message: 'Not Found' });
+        repos.delete(full);
+        return jsonRes(204, null);
+      }
+    }
+
+    // GET/PUT /repos/:owner/:repo/contents/:path
+    const contentMatch = u.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/contents\/(.+)$/);
+    if (contentMatch) {
+      const full = `${decodeURIComponent(contentMatch[1])}/${decodeURIComponent(contentMatch[2])}`;
+      const path = contentMatch[3].split('/').map(decodeURIComponent).join('/');
+      const record = repos.get(full);
+      if (!record) return jsonRes(404, { message: 'Not Found' });
+      if (method === 'GET') {
+        return record.files.has(path)
+          ? jsonRes(200, { sha: 'existing_sha', path })
+          : jsonRes(404, { message: 'Not Found' });
+      }
+      if (method === 'PUT') {
+        const body = JSON.parse(String(init.body));
+        const decoded = Buffer.from(body.content, 'base64').toString('utf8');
+        record.files.set(path, decoded);
+        return jsonRes(201, { content: { path } });
+      }
+    }
+
+    // GET/POST /repos/:owner/:repo/hooks
+    const hooksMatch = u.pathname.match(/^\/repos\/([^/]+)\/([^/]+)\/hooks$/);
+    if (hooksMatch) {
+      const full = `${decodeURIComponent(hooksMatch[1])}/${decodeURIComponent(hooksMatch[2])}`;
+      const record = repos.get(full);
+      if (!record) return jsonRes(404, { message: 'Not Found' });
+      if (method === 'GET') return jsonRes(200, record.hooks);
+      if (method === 'POST') {
+        const body = JSON.parse(String(init.body));
+        record.hooks.push(body);
+        return jsonRes(201, { id: record.hooks.length, ...body });
+      }
+    }
+
+    return jsonRes(404, { message: `Unhandled mock route: ${method} ${u.pathname}` });
+  });
+
+  try {
+    const author = await login();
+    const adminConsoleHeaders = { 'CF-Connecting-IP': '141.11.146.88', Origin: env.APP_ORIGIN };
+
+    // 1. User submits a project proposal with no GitHub repo; maintainer approves with autoCreateRepo=true
+    const proposal = await ok(
+      request('/api/project-proposals', {
+        headers: { ...author.headers, Origin: env.APP_ORIGIN, 'Idempotency-Key': randomUUID() },
+        body: {
+          schemaVersion: 1,
+          name: 'Auto Managed Solver',
+          domain: 'Combinatorics',
+          summary: 'Collaborative solver with auto-provisioned public repository.',
+          goal: 'Verify minimal constructions automatically.',
+          scoringMetric: 'Verified size',
+          acceptanceCriteria: 'Reproducible script passing verifier.',
+          githubRepo: null,
+        },
+      }),
+      201
+    );
+
+    const approved = await ok(
+      request(`/api/admin/project-proposals/${proposal.id}/approve`, {
+        headers: { ...admin.headers, Origin: env.APP_ORIGIN },
+        body: {
+          slug: 'auto-managed-solver',
+          autoCreateRepo: true,
+          verificationMethod: 'Trusted CI verifier checks metadata and reproducible outputs.',
+          targetDisplay: 'Reproducible verified solver',
+          contributionType: 'IndependentVerification',
+        },
+      })
+    );
+    expect(approved.status).toBe('Approved');
+    expect(approved.challengeSlug).toBe('auto-managed-solver');
+    expect(approved.githubRepo).toBe('https://github.com/common-intelligence-org/auto-managed-solver');
+
+    const createdRepo = repos.get('common-intelligence-org/auto-managed-solver');
+    expect(createdRepo).toBeTruthy();
+    expect(createdRepo.private).toBe(false);
+    expect(createdRepo.files.get('LICENSE')).toContain('Copyright (c) 2026 Common Intelligence Contributors');
+    expect(createdRepo.files.get('NOTICE')).toContain('归全体\nCommon Intelligence 贡献者共同所有');
+    expect(createdRepo.files.get('README.md')).toContain('全体 Common Intelligence 贡献者');
+    expect(createdRepo.files.get('.github/workflows/verify.yml')).toContain('auto-managed-solver-verifier-v1');
+    expect(createdRepo.files.get('verifiers/verify-pr.mjs')).toContain('"auto-managed-solver"');
+    expect(createdRepo.hooks).toHaveLength(1);
+    expect(createdRepo.hooks[0].config.url).toBe(`${env.APP_ORIGIN}/webhooks/github`);
+
+    // 2. Batch provision creates all missing starter repos and syncs existing ones idempotently
+    const batch = await ok(
+      request('/api/admin/console/repos/provision-all', {
+        method: 'POST',
+        headers: adminConsoleHeaders,
+        body: {},
+      })
+    );
+    expect(batch.org).toBe('common-intelligence-org');
+    expect(batch.created).toBeGreaterThanOrEqual(4);
+    expect(repos.has('common-intelligence-org/grandmaster')).toBe(true);
+    expect(repos.has('common-intelligence-org/ai-civilization')).toBe(true);
+    expect(repos.has('common-intelligence-org/open-game')).toBe(true);
+    expect(repos.has('common-intelligence-org/open-language')).toBe(true);
+
+    // 3. Delete the uncontributed auto-managed challenge AND automatically delete its GitHub repo
+    const deleted = await ok(
+      request('/api/admin/console/challenges/auto-managed-solver?deleteRepo=true', {
+        method: 'DELETE',
+        headers: adminConsoleHeaders,
+      })
+    );
+    expect(deleted).toMatchObject({
+      slug: 'auto-managed-solver',
+      deleted: true,
+      repoDeletion: { owner: 'common-intelligence-org', repo: 'auto-managed-solver', deleted: true },
+    });
+    expect(repos.has('common-intelligence-org/auto-managed-solver')).toBe(false);
+    expect((await request('/api/challenges/auto-managed-solver')).status).toBe(404);
+
+    // 4. Safety guard: refuse deleting an unmanaged external repo (owner !== GITHUB_ORG_NAME)
+    expect(
+      (
+        await request(`/api/admin/console/challenges/${externalCid}?deleteRepo=true`, {
+          method: 'DELETE',
+          headers: adminConsoleHeaders,
+        })
+      ).status
+    ).toBe(403);
+    // Still allow deleting the DB row when deleteRepo is NOT requested
+    await ok(
+      request(`/api/admin/console/challenges/${externalCid}`, {
+        method: 'DELETE',
+        headers: adminConsoleHeaders,
+      })
+    );
+  } finally {
+    setGitHubRepoFetch(undefined);
+    env.GITHUB_ADMIN_TOKEN = prevToken;
+    env.GITHUB_ORG_NAME = prevOrg;
+    env.APP_ORIGIN = prevOrigin;
+    env.ADMIN_IP_ALLOWLIST = prevAllowlist;
   }
 }, 20000);

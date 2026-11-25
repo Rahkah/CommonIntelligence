@@ -4,3 +4,5 @@ TOKEN_PEPPER=
 GITHUB_WEBHOOK_SECRET=
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
+# Fine-grained or classic PAT scoped to GITHUB_ORG_NAME for automated repo creation & deletion
+GITHUB_ADMIN_TOKEN=

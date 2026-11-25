@@ -14,13 +14,15 @@ import {
 import { browser, maintainer } from './auth';
 import { challengeSlug, publishChallenge } from './challenge-write';
 import { type App, type Ctx, fail, field, guard, id, iso, json, localized, one, page, rate, sql } from './core';
+import { deleteChallengeRepository, provisionChallengeRepository } from './github-repos';
 import { mutate } from './mutations';
 
 const repository = z.string().refine(isProjectRepositoryUrl, 'Use the canonical GitHub owner/repository URL.');
 const approvalSchema = z.object({
   slug: challengeSlug,
-  githubRepo: repository,
-  trustedCheckName: field(150),
+  githubRepo: repository.optional(),
+  autoCreateRepo: z.boolean().optional(),
+  trustedCheckName: field(150).optional(),
   verificationMethod: field(4000),
   targetDisplay: field(200),
   contributionType: z.enum(CONTRIBUTION_TYPES),
@@ -31,6 +33,9 @@ const approvalSchema = z.object({
     value: z.number().optional(),
   }).strict().optional(),
 }).strict().refine(
+  (body) => Boolean(body.autoCreateRepo) || (Boolean(body.githubRepo) && Boolean(body.trustedCheckName)),
+  { path: ['githubRepo'], message: 'Provide a GitHub repository and trusted check name, or enable autoCreateRepo.' }
+).refine(
   (body) => (body.contributionType !== 'RecordImprovement' && body.baseline?.value === undefined) || !!body.scoreDirection,
   { path: ['scoreDirection'], message: 'Choose which direction improves the record.' }
 );
@@ -112,53 +117,92 @@ projectProposals.post('/api/admin/project-proposals/:id/approve', async (c) => {
   const body = await json(c, approvalSchema);
   const proposalId = c.req.param('id');
   const db = c.env.DB;
-  return mutate(c, principal, async () => {
-    const proposal = await pendingProposal(c, proposalId);
-    const reviewedAt = iso();
-    const criteria = localized(proposal.acceptanceCriteria);
-    const writes = publishChallenge(db, {
-      ...body,
-      name: proposal.name,
-      status: 'Active',
-      domain: localized(proposal.domain),
-      tagline: localized(proposal.summary),
-      summary: localized(proposal.summary),
-      background: localized(proposal.summary),
-      ultimateGoal: localized(proposal.goal),
-      scoringMetric: localized(proposal.scoringMetric),
-      verificationMethod: localized(body.verificationMethod),
-      rules: [criteria],
-      contributionCriteria: [{
-        type: body.contributionType,
-        label: localized(''),
-        verificationMode: 'Automated + Maintainer',
-        criteria,
-      }],
-      showcase: createDefaultPendingShowcase(
-        proposal.name,
-        proposal.visualizationGoal ? localized(proposal.visualizationGoal) : undefined
-      ),
-      record: {
-        currentBestDisplay: body.baseline?.display ?? 'Unrated',
-        currentBestValue: body.baseline?.value,
-        targetDisplay: body.targetDisplay,
-        scoreDirection: body.scoreDirection,
-        attribution: '',
-        recordedAt: '',
-        sourceUrl: body.baseline?.sourceUrl ?? '',
-        sourceLabel: '',
-      },
+  const trustedCheckName = body.trustedCheckName?.trim() || `${body.slug}-verifier-v1`;
+
+  let provisioned: Awaited<ReturnType<typeof provisionChallengeRepository>> | null = null;
+  if (body.autoCreateRepo) {
+    const precheckProposal = await pendingProposal(c, proposalId);
+    const conflict = await sql(db, 'SELECT id FROM challenges WHERE id=? OR slug=?', body.slug, body.slug).first();
+    if (conflict) fail(409, 'CONFLICT', 'A challenge with this slug already exists.');
+    provisioned = await provisionChallengeRepository(c.env, {
+      slug: body.slug,
+      name: precheckProposal.name,
+      summary: precheckProposal.summary,
+      goal: precheckProposal.goal,
+      scoringMetric: precheckProposal.scoringMetric,
+      acceptanceCriteria: precheckProposal.acceptanceCriteria,
+      trustedCheckName,
+      allowExisting: false,
     });
-    return {
-      result: { ...proposal, status: 'Approved', reviewedAt, challengeSlug: body.slug },
-      writes: [
-        pending(db, proposalId),
-        ...writes,
-        sql(db, `UPDATE project_proposals SET status='Approved', reviewer_github_id=?, reviewed_at=?, challenge_id=? WHERE id=?`,
-          principal.owner, reviewedAt, body.slug, proposalId),
-      ],
-    };
-  });
+  }
+
+  const resolvedGithubRepo = provisioned?.githubRepo ?? body.githubRepo!;
+  try {
+    return await mutate(c, principal, async () => {
+      const proposal = await pendingProposal(c, proposalId);
+      const reviewedAt = iso();
+      const criteria = localized(proposal.acceptanceCriteria);
+      const writes = publishChallenge(db, {
+        ...body,
+        githubRepo: resolvedGithubRepo,
+        trustedCheckName,
+        name: proposal.name,
+        status: 'Active',
+        domain: localized(proposal.domain),
+        tagline: localized(proposal.summary),
+        summary: localized(proposal.summary),
+        background: localized(proposal.summary),
+        ultimateGoal: localized(proposal.goal),
+        scoringMetric: localized(proposal.scoringMetric),
+        verificationMethod: localized(body.verificationMethod),
+        rules: [criteria],
+        contributionCriteria: [{
+          type: body.contributionType,
+          label: localized(''),
+          verificationMode: 'Automated + Maintainer',
+          criteria,
+        }],
+        showcase: createDefaultPendingShowcase(
+          proposal.name,
+          proposal.visualizationGoal ? localized(proposal.visualizationGoal) : undefined
+        ),
+        record: {
+          currentBestDisplay: body.baseline?.display ?? 'Unrated',
+          currentBestValue: body.baseline?.value,
+          targetDisplay: body.targetDisplay,
+          scoreDirection: body.scoreDirection,
+          attribution: '',
+          recordedAt: '',
+          sourceUrl: body.baseline?.sourceUrl ?? '',
+          sourceLabel: '',
+        },
+      });
+      return {
+        result: {
+          ...proposal,
+          status: 'Approved',
+          reviewedAt,
+          challengeSlug: body.slug,
+          githubRepo: resolvedGithubRepo,
+        },
+        writes: [
+          pending(db, proposalId),
+          ...writes,
+          sql(db, `UPDATE project_proposals SET status='Approved', reviewer_github_id=?, reviewed_at=?, challenge_id=? WHERE id=?`,
+            principal.owner, reviewedAt, body.slug, proposalId),
+        ],
+      };
+    });
+  } catch (err) {
+    if (provisioned?.created) {
+      try {
+        await deleteChallengeRepository(c.env, provisioned.owner, provisioned.repo);
+      } catch (rollbackErr) {
+        console.error('Failed to rollback auto-created repository:', rollbackErr);
+      }
+    }
+    throw err;
+  }
 });
 projectProposals.post('/api/admin/project-proposals/:id/reject', async (c) => {
   const principal = await maintainer(c);

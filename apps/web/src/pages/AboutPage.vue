@@ -260,7 +260,7 @@ const { state, t, loc } = useAppState();
             </RouterLink>
 
             <a
-              href="https://github.com/common-intelligence"
+              href="https://github.com/common-intelligence-org"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-2 rounded border border-border-light px-5 py-3 text-sm font-medium text-ink transition hover:border-ink/50 dark:border-border-dark dark:text-chalk dark:hover:border-chalk/50"

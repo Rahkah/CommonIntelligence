@@ -11,6 +11,8 @@ export type Bindings = Omit<Env, 'APP_ORIGIN'> & {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   GITHUB_WEBHOOK_SECRET?: string;
+  GITHUB_ORG_NAME?: string;
+  GITHUB_ADMIN_TOKEN?: string;
 };
 export type App = { Bindings: Bindings };
 export type Ctx = Context<App>;

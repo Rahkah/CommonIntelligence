@@ -47,7 +47,7 @@ const { t, challengeName, state } = useAppState();
             join.txt
           </a>
           <a
-            href="https://github.com/common-intelligence"
+            href="https://github.com/common-intelligence-org"
             target="_blank"
             rel="noopener noreferrer"
             class="hover:text-ink dark:hover:text-chalk"

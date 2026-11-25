@@ -19,6 +19,7 @@ const error = ref<ReturnType<typeof projectErrorKey>>();
 const reason = ref('');
 const form = reactive({
   slug: props.proposal.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80),
+  autoCreateRepo: !props.proposal.githubRepo,
   githubRepo: props.proposal.githubRepo ?? '',
   trustedCheckName: '',
   verificationMethod: '',
@@ -30,6 +31,12 @@ const form = reactive({
   baselineValue: '',
 });
 
+function onManualRepoInput() {
+  if (form.githubRepo.trim()) {
+    form.autoCreateRepo = false;
+  }
+}
+
 async function review() {
   if (saving.value) return;
   error.value = undefined;
@@ -39,9 +46,13 @@ async function review() {
       emit('reviewed', await apiClient.rejectProjectProposal(props.proposal.id, reason.value));
       return;
     }
-    const { baselineDisplay, baselineSource, baselineValue, scoreDirection, ...metadata } = form;
+    const { baselineDisplay, baselineSource, baselineValue, scoreDirection, autoCreateRepo, githubRepo, trustedCheckName, ...metadata } = form;
+    const useAuto = autoCreateRepo && !githubRepo.trim();
     const body: ApproveProjectProposalRequest = {
       ...metadata,
+      autoCreateRepo: useAuto || undefined,
+      githubRepo: useAuto ? undefined : githubRepo,
+      trustedCheckName: trustedCheckName || (useAuto ? `${form.slug}-verifier-v1` : ''),
       scoreDirection: scoreDirection || undefined,
       baseline: baselineDisplay || baselineSource || baselineValue !== ''
         ? { display: baselineDisplay, sourceUrl: baselineSource, value: baselineValue === '' ? undefined : Number(baselineValue) }
@@ -71,6 +82,13 @@ async function review() {
       </div>
       <template v-if="action === 'approve'">
         <p class="text-sm text-ink-muted dark:text-chalk-muted">{{ t.projects.readiness }}</p>
+        <label class="flex items-start gap-2 rounded border border-border-light bg-subtle/40 p-3 text-xs dark:border-border-dark dark:bg-obsidian-subtle/40">
+          <input v-model="form.autoCreateRepo" type="checkbox" class="mt-0.5" />
+          <span class="space-y-0.5">
+            <span class="block font-medium text-ink dark:text-chalk">{{ t.projects.autoCreateRepo }}</span>
+            <span class="block text-ink-muted dark:text-chalk-muted">{{ t.projects.autoCreateRepoHint }}</span>
+          </span>
+        </label>
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="project-field">
             <span>{{ t.projects.slug }}</span>
@@ -78,11 +96,23 @@ async function review() {
           </label>
           <label class="project-field">
             <span>{{ t.projects.githubRepo }}</span>
-            <input v-model.trim="form.githubRepo" required type="url" maxlength="300" placeholder="https://github.com/owner/repository" />
+            <input
+              v-model.trim="form.githubRepo"
+              :required="!form.autoCreateRepo"
+              type="url"
+              maxlength="300"
+              :placeholder="form.autoCreateRepo ? `https://github.com/common-intelligence-org/${form.slug || 'project-name'}` : 'https://github.com/owner/repository'"
+              @input="onManualRepoInput"
+            />
           </label>
           <label class="project-field">
             <span>{{ t.projects.trustedCheckName }}</span>
-            <input v-model.trim="form.trustedCheckName" required maxlength="150" />
+            <input
+              v-model.trim="form.trustedCheckName"
+              :required="!form.autoCreateRepo"
+              maxlength="150"
+              :placeholder="form.slug ? `${form.slug}-verifier-v1` : 'project-verifier-v1'"
+            />
           </label>
           <label class="project-field">
             <span>{{ t.projects.targetDisplay }}</span>

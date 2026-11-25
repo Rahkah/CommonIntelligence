@@ -34,7 +34,7 @@ Verified public opponent benchmark:
                             must be original, clean-room, and reproducibly trained.
 
 Challenge GitHub Repository:
-  https://github.com/common-intelligence/grandmaster
+  https://github.com/common-intelligence-org/grandmaster
 
 ================================================================================
 2.5. PHASE 0 FOUNDATION & LIVE SHOWCASE REFERENCE
