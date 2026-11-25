@@ -6,9 +6,12 @@
   "packageManager": "pnpm@11.16.0",
   "scripts": {
     "dev": "pnpm --filter @common-intelligence/web dev",
-    "build": "pnpm --filter @common-intelligence/shared build && pnpm --filter @common-intelligence/web build",
+    "dev:api": "pnpm build:web:live && pnpm --filter @common-intelligence/api dev",
+    "db:local": "pnpm --filter @common-intelligence/api db:local && pnpm --filter @common-intelligence/api exec node scripts/seed.mjs",
+    "build:web:live": "pnpm --filter @common-intelligence/web exec vite build --mode live",
+    "build": "pnpm --filter @common-intelligence/shared build && pnpm build:web:live && pnpm --filter @common-intelligence/api build",
     "preview": "pnpm --filter @common-intelligence/web preview",
-    "typecheck": "pnpm --filter @common-intelligence/shared typecheck && pnpm --filter @common-intelligence/web typecheck",
-    "test": "pnpm --filter @common-intelligence/shared test && pnpm --filter @common-intelligence/web test"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
   }
 }

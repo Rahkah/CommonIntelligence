@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "common-intelligence-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "APP_ORIGIN": "http://localhost:8787" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "common-intelligence",
+    "migrations_dir": "../../docs/backend/migrations"
+  }],
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "observability": { "enabled": true },
+  "env": {
+    "production": {
+      "name": "common-intelligence-api",
+      "account_id": "a17920dd88d0eec815350eba8ecfe9d8",
+      "workers_dev": true,
+      "vars": { "APP_ORIGIN": "https://common-intelligence-api.common-intelligence.workers.dev" },
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "common-intelligence",
+        "database_id": "6566e892-dd50-4bd1-895a-541c060aae7f",
+        "migrations_dir": "../../docs/backend/migrations"
+      }]
+    }
+  }
+}

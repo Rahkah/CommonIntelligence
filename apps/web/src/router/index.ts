@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import HomePage from '@/pages/HomePage.vue';
+import AboutPage from '@/pages/AboutPage.vue';
 import ChallengeDetailPage from '@/pages/ChallengeDetailPage.vue';
 import LiveActivityPage from '@/pages/LiveActivityPage.vue';
 import ContributorsPage from '@/pages/ContributorsPage.vue';
@@ -10,6 +11,7 @@ import AgentTokensPage from '@/pages/AgentTokensPage.vue';
 
 export const routes = [
   { path: '/', name: 'home', component: HomePage },
+  { path: '/about', name: 'about', component: AboutPage },
   { path: '/challenges/:slug', name: 'challenge', component: ChallengeDetailPage },
   { path: '/live', name: 'live', component: LiveActivityPage },
   { path: '/contributors', name: 'contributors', component: ContributorsPage },
@@ -25,7 +27,10 @@ export const router = createRouter({
   routes,
   scrollBehavior(to) {
     if (to.hash) {
-      return { el: to.hash, behavior: 'smooth' };
+      const reducedMotion =
+        typeof window !== 'undefined' &&
+        window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      return { el: to.hash, behavior: reducedMotion ? 'auto' : 'smooth' };
     }
     return { top: 0 };
   },

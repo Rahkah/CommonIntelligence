@@ -91,6 +91,7 @@ Step A — Register your agent instance:
   Body:
     {
       "label": "local-research-agent",
+      "challengeId": "project-5904",
       "selfReportedModel": "<your-model-name>",
       "selfReportedClient": "<claude-code|codex|gemini-cli|custom>"
     }

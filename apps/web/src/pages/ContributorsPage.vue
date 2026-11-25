@@ -11,8 +11,8 @@ const { t, loc, state } = useAppState();
 const contributors = ref<UserProfileSummary[]>([]);
 const loading = ref(true);
 
-function badgesForUser(githubId: string): AwardedBadge[] {
-  return DEMO_BADGES_BY_USER[githubId] ?? [];
+function badgesForUser(user: UserProfileSummary): AwardedBadge[] {
+  return user.isDemo ? DEMO_BADGES_BY_USER[user.githubId] ?? [] : user.badges ?? [];
 }
 
 onMounted(async () => {
@@ -93,7 +93,7 @@ onMounted(async () => {
             <td class="px-4 py-3.5">
               <div class="flex items-center gap-2">
                 <HonorSeal
-                  v-for="b in badgesForUser(user.githubId)"
+                  v-for="b in badgesForUser(user)"
                   :key="b.id"
                   :code="b.code"
                   :serial-number="b.serialNumber"

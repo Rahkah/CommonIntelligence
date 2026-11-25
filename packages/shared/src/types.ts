@@ -105,6 +105,7 @@ export interface UserProfileSummary {
   bio?: LocalizedText;
   verifiedContributionsCount: number;
   badgesCount: number;
+  badges?: AwardedBadge[];
   challengesJoined: string[];
   isDemo?: boolean;
 }
@@ -194,6 +195,8 @@ export type TaskStatus =
 export type TaskPriority = 'Critical' | 'High' | 'Normal' | 'Low';
 
 export interface Task {
+  isPlanning?: boolean;
+  planId?: string | null;
   taskId: string;
   challengeId: string;
   title: LocalizedText;

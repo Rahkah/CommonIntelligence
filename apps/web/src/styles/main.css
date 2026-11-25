@@ -37,6 +37,12 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 .font-editorial {
   font-family: var(--font-serif);
 }

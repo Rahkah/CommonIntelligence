@@ -121,6 +121,7 @@ describe('Common Intelligence Frontend MVP', () => {
       ['/contributors', 'Founding Contributor'],
       ['/u/elena-rostova-demo', 'GitHub Profile README Badge'],
       ['/docs', 'Documentation & Governance'],
+      ['/about', 'What happens when intelligence works together?'],
     ];
     for (const [path, expected] of checks) {
       const router = createTestRouter(path);
@@ -130,5 +131,63 @@ describe('Common Intelligence Frontend MVP', () => {
       expect(wrapper.text()).toContain(expected);
       wrapper.unmount();
     }
+  });
+
+  it('renders /about with all five manifesto sections, honor seals specimen note, interactive loop, and Chinese toggle', async () => {
+    const router = createTestRouter('/about');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    // Navigation includes About
+    const aboutLinks = wrapper.findAll('a[href="/about"]');
+    expect(aboutLinks.length).toBeGreaterThanOrEqual(1);
+
+    // Strictly five core sections inside About article
+    const sections = wrapper.findAll('article > section');
+    expect(sections).toHaveLength(5);
+
+    const text = wrapper.text();
+    expect(text).toContain('What happens when intelligence works together?');
+    expect(text).toContain('Independent agents. Shared knowledge. Collective discovery.');
+    expect(text).toContain('No central AI. No isolated discoveries. One shared goal.');
+    expect(text).toContain('Discover');
+    expect(text).toContain('Collaborate');
+    expect(text).toContain('Verify');
+    expect(text).toContain('Share');
+    expect(text).toContain('Every discovery deserves to be remembered.');
+    expect(text).toContain('Illustrative Specimen');
+    expect(text).toContain('No single mind has the answer.');
+    expect(text).toContain('Together, we might.');
+    expect(text).toContain('Explore Challenges');
+    expect(text).toContain('View on GitHub');
+
+    // Interactive canvas & existing HonorSeal medallions
+    expect(wrapper.find('canvas').exists()).toBe(true);
+    expect(wrapper.findAll('article section:nth-of-type(4) svg').length).toBeGreaterThanOrEqual(6);
+
+    // Clicking a stage in the cycle diagram marks it active
+    const verifyBtn = wrapper
+      .findAll('article section:nth-of-type(3) ol button')
+      .find((b) => b.text().includes('Verify'));
+    expect(verifyBtn).toBeDefined();
+    await verifyBtn!.trigger('click');
+    expect(verifyBtn!.attributes('aria-current')).toBe('step');
+
+    // Language switch to Chinese
+    const langBtn = wrapper.findAll('button').find((b) => b.text().includes('EN / 中'));
+    expect(langBtn).toBeDefined();
+    await langBtn!.trigger('click');
+    await flushPromises();
+
+    const zhText = wrapper.text();
+    expect(zhText).toContain('当智能彼此协作，会发生什么？');
+    expect(zhText).toContain('没有中央 AI。没有孤立的发现。只有一个共同的目标。');
+    expect(zhText).toContain('每一次发现，都值得被铭记。');
+    expect(zhText).toContain('示例展示');
+    expect(zhText).toContain('探索开放挑战');
+    expect(zhText).toContain('在 GitHub 查看');
+
+    wrapper.unmount();
   });
 });

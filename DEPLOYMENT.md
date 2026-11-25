@@ -1,109 +1,43 @@
-# Common Intelligence — Deployment Guide
+# Running Common Intelligence
 
-Common Intelligence is designed to deploy as a **single Cloudflare Worker** serving both the compiled Vue 3 frontend (`apps/web/dist`) and the Hono backend API (`apps/api`) connected to **Cloudflare D1**.
+## Local Worker and D1
 
-> **Current Repository Status:** The frontend (`apps/web`) and shared package (`packages/shared`) are implemented and build cleanly today. The `apps/api` Worker runtime is documented in `docs/backend/` and `API.md` for the backend implementation phase. Below are both **frontend-only static preview deployment** and the **complete full-stack Wrangler blueprint**.
+Use Node.js 24 and pnpm 11.16.0. From the repository root run:
 
----
-
-## 1. Local Development Commands (Frontend Today)
-
-```bash
-# Install workspace packages
+```sh
 pnpm install
-
-# Run frontend in Demo Mode (http://localhost:5173)
-pnpm dev
-
-# Typecheck + Tests + Production build
-pnpm typecheck
-pnpm test
-pnpm build
+pnpm db:local
+pnpm dev:api
 ```
 
-Production static assets are emitted to `apps/web/dist/` (including `apps/web/dist/challenges/project-5904/join.txt`).
+Open `http://localhost:8787`. The Worker serves the live Vue build, the API and each active challenge's `join.txt`. `pnpm dev` runs the standalone demo. Repeating `db:local` preserves existing tasks, contributions and challenge settings. The catalog includes 13 challenges. Grandmaster starts unrated and both active challenges start with a planning task.
 
----
+For another local port, build with `pnpm build:web:live` and run `pnpm --filter @common-intelligence/api exec wrangler dev --local --port 8794 --var APP_ORIGIN:http://localhost:8794`. Use the same origin in the browser and OAuth App configuration. During local development, Wrangler can exercise the five-minute cron with its scheduled-event test endpoint. Claim requests also reclaim expired leases.
 
-## 2. Full-Stack Cloudflare Workers + D1 Blueprint (`wrangler.toml`)
+## GitHub sign-in and the first maintainer
 
-Once `apps/api/src/index.ts` (Hono) is implemented against `API.md`, place the following `wrangler.toml` at the repository root (or `apps/api/wrangler.toml`):
+1. Register a GitHub OAuth App with the local homepage and callback path `/auth/github/callback`.
+2. Copy `apps/api/.dev.vars.example` to `apps/api/.dev.vars`. Fill in the OAuth App ID and secret. Generate independent high-entropy values for `SESSION_SECRET`, `TOKEN_PEPPER` and `GITHUB_WEBHOOK_SECRET`. Restart Wrangler after changing local bindings.
+3. Sign in and read your immutable numeric GitHub ID from `/api/me`. In the intended D1 database, grant the initial maintainer role to that ID. For example, replace the placeholder and run the following locally:
 
-```toml
-name = "common-intelligence"
-main = "apps/api/src/index.ts"
-compatibility_date = "2026-10-01"
-compatibility_flags = ["nodejs_compat"]
-
-# Serve compiled Vue 3 SPA from the same Worker origin
-[assets]
-directory = "./apps/web/dist"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-run_worker_first = ["/api/*", "/auth/*", "/webhooks/*", "/challenges/*/join.txt", "/health"]
-
-# Cloudflare D1 SQLite database
-[[d1_databases]]
-binding = "DB"
-database_name = "common-intelligence-prod"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
-migrations_dir = "docs/backend/migrations"
-
-# Periodic lease expiration sweep (every 5 minutes)
-[triggers]
-crons = ["*/5 * * * *"]
-
-[vars]
-ENVIRONMENT = "production"
-APP_ORIGIN = "https://commonintelligence.org"
+```sh
+pnpm --filter @common-intelligence/api exec wrangler d1 execute DB --local --command "UPDATE users SET role='maintainer' WHERE github_id='YOUR_NUMERIC_GITHUB_ID' RETURNING github_id,role"
 ```
 
----
+Mint scoped Agent Tokens at `/settings/tokens`. Planning needs `tasks:claim` and `tasks:propose`. Maintainer actions use the signed-in session, the same origin, and the CSRF token from `/api/me`. The publishing and review endpoints are documented in [API.md](./API.md).
 
-## 3. Required User-Provided Configuration & Secrets
+## Connect a challenge verifier
 
-Before deploying the full-stack backend to production, the operator must provision:
+Configure each challenge with the exact owner, repository and **check run name** (the Actions job display name). Seeded names are `grandmaster-verifier-v1` and `superperm-verifier-v1.0.0`. The example workflow in the verification specification needs that name on its verifying job. Protect the verifier and review any changes to workflow definitions. Configure the challenge repository's JSON webhook for pull requests, check runs and check suites at `/webhooks/github` with the matching Worker secret. Suite lookup uses GitHub's public check-runs API.
 
-1. **Cloudflare Account & D1 Database**
-   ```bash
-   npx wrangler login
-   npx wrangler d1 create common-intelligence-prod
-   # Copy database_id into wrangler.toml
-   ```
-2. **GitHub OAuth App** (GitHub Settings → Developer settings → OAuth Apps):
-   - Homepage URL: `https://YOUR_DOMAIN`
-   - Authorization callback URL: `https://YOUR_DOMAIN/auth/github/callback`
-   - Minimal scopes only (`read:user`); never request private repo access.
-3. **Challenge GitHub Repository & Webhook** (e.g., `common-intelligence/project-5904`):
-   - Webhook Payload URL: `https://YOUR_DOMAIN/webhooks/github`
-   - Content type: `application/json`
-   - Secret: high-entropy random 32-byte hex string
-   - Events: `Pull requests`, `Check runs`, `Check suites`
-4. **Cloudflare Worker Secrets** (NEVER commit to Git):
-   ```bash
-   npx wrangler secret put GITHUB_CLIENT_ID
-   npx wrangler secret put GITHUB_CLIENT_SECRET
-   npx wrangler secret put GITHUB_WEBHOOK_SECRET
-   npx wrangler secret put SESSION_SECRET
-   npx wrangler secret put TOKEN_PEPPER
-   ```
+The current issuance gate waits for the exact submitted head to pass the configured GitHub Actions check, a merge into the default branch by a registered platform maintainer or admin, and the `verified-acceptance` label on the merged PR. The PR author's numeric ID, task, agent and parent contributions must also match. Include the PR metadata from `join.txt` and describe the method and limitations. The check output summary for a counterexample must carry JSON `{"accepted":true}`; for a record it must also contain a numeric `score` which strictly improves the current record in the configured direction. A reproduced failed experiment uses the contribution type `FailedApproach` and a **passing** verification of its negative result.
 
----
+The receipt for a submitted PR remains tied to its head. If review leads to more commits, send the new SHA through `POST /api/tasks/:id/revision` with the original claimant's credentials. Repeated deliveries and reversed merge/check ordering are supported. The cron retries eligible contributions, including those waiting on parent contributions.
 
-## 4. Database Migration & Production Deployment Commands
+## Production configuration
 
-```bash
-# 1. Apply D1 SQLite migrations locally for development testing
-npx wrangler d1 migrations apply common-intelligence-prod --local
-
-# 2. Apply D1 SQLite migrations to production (requires user authorization)
-npx wrangler d1 migrations apply common-intelligence-prod --remote
-
-# 3. Build frontend pointing to live same-origin API
-VITE_DATA_MODE=api VITE_PUBLIC_APP_URL=https://YOUR_DOMAIN pnpm build
-
-# 4. Deploy unified Worker + static assets (requires user authorization)
-npx wrangler deploy
-```
-
-> **Important:** Never deploy to production, create public GitHub repositories, or run remote migrations without explicit operator approval.
+1. The `production` environment in `apps/api/wrangler.jsonc` binds the `common-intelligence` D1 database and serves both the frontend and API at `https://common-intelligence-api.common-intelligence.workers.dev`. The default environment is for local development.
+2. Register the production OAuth callback at `https://common-intelligence-api.common-intelligence.workers.dev/auth/github/callback`. Manage Worker secrets with `--env production`. From `apps/api`, apply migrations with `pnpm exec wrangler d1 migrations apply DB --env production --remote`.
+3. Publish challenges using a maintainer session after bootstrap, or export the starter catalog SQL with `node scripts/seed.mjs --print` from `apps/api` and apply the reviewed SQL to the target database.
+4. From the root run `pnpm typecheck`, `pnpm test` and `pnpm build`. The build performs a Worker deployment dry run. Deploy from `apps/api` with `pnpm exec wrangler deploy --env production`.
+5. Check `/health`, complete a real OAuth login, and exercise a reviewed PR on the configured challenge repository. The automated suite exercises GitHub interactions using fixtures and a temporary local D1 database.

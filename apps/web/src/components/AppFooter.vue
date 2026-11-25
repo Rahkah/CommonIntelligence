@@ -17,6 +17,9 @@ const { t, state } = useAppState();
         </div>
 
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-muted dark:text-chalk-muted">
+          <RouterLink to="/about" class="hover:text-ink dark:hover:text-chalk">
+            {{ t.nav.about }}
+          </RouterLink>
           <RouterLink to="/challenges/grandmaster" class="hover:text-ink dark:hover:text-chalk">
             Project Grandmaster
           </RouterLink>

@@ -1,6 +1,6 @@
 # Common Intelligence — Implementation Plan & Progress
 
-> **Scope note (explicit user directive):** This repository currently implements the **Frontend MVP (`apps/web`)**, shared TypeScript domain contracts + independent superpermutation verifier + safe SVG certificate/badge generators (`packages/shared`), and **complete implementation-ready Backend & Operations documentation** (`docs/backend/`, `ARCHITECTURE.md`, `API.md`, `SECURITY.md`, `DEPLOYMENT.md`, `CONTRIBUTING.md`). Backend runtime code (Hono on Cloudflare Workers + Cloudflare D1 + GitHub OAuth + GitHub Webhooks) is specified in full documentation for implementation in the backend phase.
+The frontend, shared contracts and Worker API are implemented. Local verification uses D1 and signed GitHub fixtures. Production GitHub and Cloudflare setup are tracked separately in [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 ---
 
@@ -66,10 +66,9 @@ Before finalizing the name and target of the first formal challenge, public math
 - [x] Public Credential page renders XML-escaped downloadable SVG Digital Certificate + copyable GitHub README badge snippet.
 - [x] Zero TypeScript errors (`pnpm typecheck`), passing unit/component tests (`pnpm test`), passing production build (`pnpm build`).
 
-### Backend Runtime (Documented for Next Phase — Not Yet Deployed)
-- [ ] Hono API on Cloudflare Workers implementing `API.md`.
-- [ ] Cloudflare D1 migrations executed (`docs/backend/migrations/0001_initial.sql`).
-- [ ] Real GitHub OAuth flow with State, HttpOnly/Secure cookies, and CSRF protection.
-- [ ] Atomic task claiming, lease token enforcement, heartbeat & expiry sweep.
-- [ ] GitHub Challenge repository PR verification via least-privilege GitHub Actions & signed Webhooks.
-- [ ] Live dynamic SVG endpoints (`/api/badges/:githubId.svg`, `/api/credentials/:id.svg`) and atomic Founding Contributor #1–#100 award issuance.
+### Backend runtime
+- [x] Hono API, local D1 migrations, challenge publishing and planner review.
+- [x] GitHub OAuth handlers, session/CSRF checks and scoped Agent Tokens exercised with fixture identities.
+- [x] Atomic allocation, heartbeat, release, expiry, task budgets and idempotent retries.
+- [x] Signed webhook ingestion, verified knowledge, dependencies, credentials, SVGs and atomic founding serials exercised on local D1.
+- [ ] Connect real challenge repositories and verification workflows, register production OAuth and exercise the deployed path.

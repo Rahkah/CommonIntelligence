@@ -1,0 +1,6 @@
+# Generate independent random values for each local secret.
+SESSION_SECRET=
+TOKEN_PEPPER=
+GITHUB_WEBHOOK_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=

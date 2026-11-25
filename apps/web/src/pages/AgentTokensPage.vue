@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { watch, reactive, ref } from 'vue';
 import type { AgentToken, AgentTokenScope } from '@common-intelligence/shared';
 import { AlertTriangle, Github, KeyRound, ShieldOff } from 'lucide-vue-next';
 import CopyCommandBox from '@/components/CopyCommandBox.vue';
@@ -32,6 +32,7 @@ const form = reactive({
     'agent:register',
     'tasks:read',
     'tasks:claim',
+    'tasks:propose',
     'knowledge:read',
   ] as AgentTokenScope[],
 });
@@ -47,7 +48,10 @@ async function loadTokens() {
   }
 }
 
-onMounted(loadTokens);
+watch(() => state.user?.githubId, (githubId) => {
+  if (githubId) void loadTokens();
+  else { tokens.value = []; newlyCreatedPlaintext.value = null; loading.value = false; }
+}, { immediate: true });
 
 async function createToken() {
   if (!form.name.trim() || form.scopes.length === 0) return;

@@ -49,8 +49,8 @@ const eloGap = computed(() => {
   return rec.targetValue - rec.currentBestValue;
 });
 
-function badgesForUser(githubId: string): AwardedBadge[] {
-  return DEMO_BADGES_BY_USER[githubId] ?? [];
+function badgesForUser(user: UserProfileSummary): AwardedBadge[] {
+  return user.isDemo ? DEMO_BADGES_BY_USER[user.githubId] ?? [] : user.badges ?? [];
 }
 
 onMounted(async () => {
@@ -157,7 +157,7 @@ onMounted(async () => {
     </section>
 
     <!-- 3. Public Challenges (Flagship Chess Engine vs Stockfish 19 + Other Open/Proposed) -->
-    <section class="mt-14 space-y-5">
+    <section id="challenges" class="mt-14 scroll-mt-20 space-y-5">
       <div class="flex items-end justify-between gap-4">
         <h2 class="text-lg font-semibold tracking-tight text-ink dark:text-chalk">
           {{ state.locale === 'zh' ? '公共挑战' : 'Public Challenges' }}
@@ -234,12 +234,12 @@ onMounted(async () => {
           </div>
 
           <div class="flex flex-col justify-center">
-            <div class="flex items-center justify-between font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              <span>2,680</span>
+            <div v-if="flagship.record.scaleStartValue !== undefined" class="flex items-center justify-between font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+              <span>{{ flagship.record.scaleStartValue.toLocaleString() }}</span>
               <span class="font-semibold text-ink dark:text-chalk">{{ eloProgressPct }}%</span>
               <span>3,650+</span>
             </div>
-            <div class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
+            <div v-if="flagship.record.scaleStartValue !== undefined" class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
               <div
                 class="h-full rounded-full bg-accent dark:bg-accent-dark"
                 :style="{ width: `${eloProgressPct}%` }"
@@ -350,7 +350,7 @@ onMounted(async () => {
           <div class="flex items-center gap-4">
             <div class="flex items-center gap-1.5">
               <HonorSeal
-                v-for="b in badgesForUser(user.githubId)"
+                v-for="b in badgesForUser(user)"
                 :key="b.id"
                 :code="b.code"
                 :serial-number="b.serialNumber"

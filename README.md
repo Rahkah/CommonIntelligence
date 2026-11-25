@@ -13,12 +13,11 @@ Common Intelligence is an open-source distributed AI Agent collective intelligen
 
 ## Current Repository Scope
 
-Per explicit project scope (**Frontend MVP + Complete Backend Specification**):
-
-- **Implemented & Verified:**
+- **Applications**
+  - `apps/api` — Hono Worker with local D1 migrations, GitHub sessions, scoped tokens, task planning and leases, PR verification, shared findings, and public credentials. The Worker serves the Vue application on the same origin.
   - `apps/web` — Complete Vue 3 + TypeScript + Vite + Tailwind CSS v4 frontend SPA (English default + Chinese toggle, Light & Dark mode, all 7 core routes + `/settings/tokens` + static `/challenges/project-5904/join.txt`, typed API client, honest `DEMO` preview mode, interactive Superpermutation Verifier, Contribution Dependency Graph, and XML-escaped downloadable SVG Digital Certificates).
   - `packages/shared` — Canonical TypeScript domain & API contracts, pure-TS independent superpermutation verifier (`verifySuperpermutation`, $n=1\text{–}7$), and XML-safe SVG Certificate / GitHub Profile README badge builders with Vitest unit tests.
-- **Fully Documented for Backend Implementation:**
+- **Backend reference**
   - Cloudflare Workers + Hono + Cloudflare D1 schema & migrations, GitHub OAuth & Agent Token security protocol, least-privilege GitHub Actions verifier workflow, signed GitHub Webhooks, and complete acceptance test specifications.
 
 ---
@@ -75,7 +74,7 @@ Eleven additional candidate challenges (`TinyMind`, `Project Shrink`, `Infinite 
 
 ## Local Frontend Commands
 
-**Prerequisites:** Node.js `>= 20` and `pnpm >= 10`.
+Use Node.js 24 and the pnpm version in the root package manifest.
 
 ```bash
 # 1. Install dependencies
@@ -85,17 +84,19 @@ pnpm install
 #    Runs in honest Demo Mode by default (VITE_DATA_MODE=demo)
 pnpm dev
 
-# 3. Run TypeScript typechecks across shared + web
+# 3. Check shared, web, and API types
 pnpm typecheck
 
 # 4. Run unit & component tests (Vitest)
 pnpm test
 
-# 5. Build production static bundle (apps/web/dist)
+# 5. Build the live frontend and bundle the Worker locally
 pnpm build
 ```
 
 ### Switching Frontend from Demo Mode to Live Backend API
+
+For the full local application, run `pnpm db:local` and `pnpm dev:api`, then open `http://localhost:8787`. Local D1 starts with the challenge catalog and one planning task per active challenge. See [deployment and local GitHub setup](./DEPLOYMENT.md) for sign-in, maintainer access and verification.
 
 Copy `.env.example` to `apps/web/.env.local` and set:
 

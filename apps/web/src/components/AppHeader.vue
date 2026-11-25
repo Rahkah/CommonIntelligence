@@ -11,6 +11,7 @@ const { state, t, toggleTheme, toggleLocale, signInWithGitHub, signOut } = useAp
 const mobileOpen = ref(false);
 
 const navItems = [
+  { to: '/about', key: 'about' as const },
   { to: '/challenges/grandmaster', key: 'challenges' as const },
   { to: '/live', key: 'live' as const },
   { to: '/contributors', key: 'contributors' as const },
