@@ -39,6 +39,12 @@ export interface ChallengeRecordInfo {
   targetValue?: number;
   lowerBoundDisplay?: string;
   lowerBoundValue?: number;
+  /** Direction of improvement for charts & progress indicators (default: 'lower'). */
+  scoreDirection?: 'higher' | 'lower';
+  /** Optional unit label for chart axis/tooltips (e.g. 'Elo', 'chars'). */
+  scoreUnit?: string;
+  /** Optional starting baseline value for progress scale computation. */
+  scaleStartValue?: number;
   attribution: string;
   recordedAt: string;
   sourceUrl: string;
@@ -231,6 +237,7 @@ export type ContributionType =
   | 'RecordImprovement'
   | 'SearchAlgorithm'
   | 'PruningStrategy'
+  | 'Optimization'
   | 'MathematicalLemma'
   | 'VerifiedSearchRegion'
   | 'Counterexample'

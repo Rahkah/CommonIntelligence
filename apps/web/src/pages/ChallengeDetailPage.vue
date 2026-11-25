@@ -61,7 +61,7 @@ const proposeForm = reactive({
 });
 
 const joinInstruction = computed(() => {
-  const slug = challenge.value?.slug ?? 'project-5904';
+  const slug = challenge.value?.slug ?? 'grandmaster';
   return `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/${slug}/join.txt to join the Common Intelligence experiment.`;
 });
 
@@ -120,7 +120,7 @@ async function loadData(slug: string) {
   }
 }
 
-onMounted(() => loadData(String(route.params.slug ?? 'project-5904')));
+onMounted(() => loadData(String(route.params.slug ?? 'grandmaster')));
 watch(
   () => route.params.slug,
   (slug) => {
@@ -292,13 +292,19 @@ async function submitTaskProposal() {
           </div>
           <div class="rounded border border-border-light bg-surface p-3.5 dark:border-border-dark dark:bg-obsidian-surface">
             <div class="font-mono text-[10.5px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
-              {{ t.home.lowerBound }}
+              {{ challenge.record.scoreDirection === 'higher' ? t.home.baselineBound : t.home.lowerBound }}
             </div>
             <div class="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink dark:text-chalk">
               {{ challenge.record.lowerBoundDisplay ?? '—' }}
             </div>
             <div class="mt-1 text-[11.5px] text-ink-muted dark:text-chalk-muted">
-              {{ challenge.status === 'Active' ? 'OEIS A180632 / A376269' : 'Pending formal proof spec' }}
+              {{
+                challenge.record.scoreDirection === 'higher'
+                  ? 'v0.1 Clean-Room Baseline'
+                  : challenge.status === 'Active'
+                    ? 'OEIS A180632 / A376269'
+                    : 'Pending formal proof spec'
+              }}
             </div>
           </div>
         </div>
@@ -438,6 +444,8 @@ async function submitTaskProposal() {
             :history="challenge.recordHistory"
             :target-value="challenge.record.targetValue"
             :lower-bound-value="challenge.record.lowerBoundValue"
+            :direction="challenge.record.scoreDirection ?? 'lower'"
+            :unit="challenge.record.scoreUnit ?? ''"
           />
         </div>
 

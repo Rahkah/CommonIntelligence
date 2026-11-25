@@ -17,6 +17,9 @@ const { t, state } = useAppState();
         </div>
 
         <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-ink-muted dark:text-chalk-muted">
+          <RouterLink to="/challenges/grandmaster" class="hover:text-ink dark:hover:text-chalk">
+            Project Grandmaster
+          </RouterLink>
           <RouterLink to="/challenges/project-5904" class="hover:text-ink dark:hover:text-chalk">
             Project 5904
           </RouterLink>
@@ -30,7 +33,7 @@ const { t, state } = useAppState();
             {{ t.nav.docs }}
           </RouterLink>
           <a
-            href="/challenges/project-5904/join.txt"
+            href="/challenges/grandmaster/join.txt"
             target="_blank"
             rel="noopener noreferrer"
             class="font-mono hover:text-ink dark:hover:text-chalk"

@@ -23,23 +23,21 @@ describe('Common Intelligence Frontend MVP', () => {
     state.user = null;
   });
 
-  it('renders HomePage with verified 5,905 record, slogan, join command, and DEMO indicator', async () => {
+  it('renders streamlined HomePage with science-history hook, Grandmaster vs Stockfish 19, join prompt, login, and contributors', async () => {
     const router = createTestRouter('/');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
     const text = wrapper.text();
-    expect(text).toContain('One problem. Thousands of minds.');
+    expect(text).toContain('Leave your name in science with your AI.');
+    expect(text).toContain('Sign in with GitHub');
+    expect(text).toContain('/challenges/grandmaster/join.txt');
+    expect(text).toContain('Project Grandmaster');
+    expect(text).toContain('Stockfish 19');
     expect(text).toContain('Project 5904');
-    expect(text).toContain('5,905');
-    expect(text).toContain('5,884');
-    expect(text).toContain('Andrei Teodorescu');
-    expect(text).toContain('/challenges/project-5904/join.txt');
+    expect(text).toContain('@elena-rostova-demo');
     expect(text).toContain('DEMO');
-    // Verify candidate challenges catalog includes TinyMind & Matrix Frontier
-    expect(text).toContain('TinyMind');
-    expect(text).toContain('Matrix Frontier');
   });
 
   it('switches language between English and Chinese', async () => {
@@ -53,19 +51,20 @@ describe('Common Intelligence Frontend MVP', () => {
     await langBtn!.trigger('click');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('当前开放主挑战');
-    expect(wrapper.text()).toContain('候选挑战规划');
+    expect(wrapper.text()).toContain('让你的 AI，在科学史上留下你的名字。');
+    expect(wrapper.text()).toContain('公共挑战');
+    expect(wrapper.text()).toContain('有效贡献者');
   });
 
   it('renders public credential verification page with safe SVG image and ledger metadata', async () => {
-    const router = createTestRouter('/credentials/ci-cred-5904-0001');
+    const router = createTestRouter('/credentials/ci-cred-gm-0004');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
-    expect(wrapper.text()).toContain('ci-cred-5904-0001');
-    expect(wrapper.text()).toContain('@elena-rostova-demo');
-    expect(wrapper.text()).toContain('superperm-verifier-v1.0.0');
+    expect(wrapper.text()).toContain('ci-cred-gm-0004');
+    expect(wrapper.text()).toContain('@lin-chen-demo');
+    expect(wrapper.text()).toContain('fastchess-sprt-v1.0.0');
     const img = wrapper.find('img[alt*="Proof of Contribution Certificate"]');
     expect(img.exists()).toBe(true);
     expect(img.attributes('src')).toContain('data:image/svg+xml');
@@ -92,13 +91,11 @@ describe('Common Intelligence Frontend MVP', () => {
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
-    // Sign in with Demo GitHub session
     const signInBtn = wrapper.findAll('button').find((b) => b.text().includes('Sign in with GitHub'));
     expect(signInBtn).toBeDefined();
     await signInBtn!.trigger('click');
     await flushPromises();
 
-    // Create scoped token
     const input = wrapper.find('input[placeholder*="claude-code"]');
     expect(input.exists()).toBe(true);
     await input.setValue('test-local-agent');
@@ -108,7 +105,6 @@ describe('Common Intelligence Frontend MVP', () => {
     expect(wrapper.text()).toContain('ci_agt_demo_');
     expect(wrapper.text()).toContain('test-local-agent');
 
-    // Revoke token
     const revokeBtn = wrapper.findAll('button').find((b) => b.text().includes('Revoke'));
     expect(revokeBtn).toBeDefined();
     await revokeBtn!.trigger('click');
@@ -117,9 +113,10 @@ describe('Common Intelligence Frontend MVP', () => {
     expect(wrapper.text()).toContain('REVOKED');
   });
 
-  it('renders /challenges/project-5904, /live, /contributors, /u/:username, and /docs cleanly', async () => {
+  it('renders /challenges/grandmaster, /challenges/project-5904, /live, /contributors, /u/:username, and /docs cleanly', async () => {
     const checks: Array<[string, string]> = [
-      ['/challenges/project-5904', 'Verified Record Progression'],
+      ['/challenges/grandmaster', 'Stockfish 19'],
+      ['/challenges/project-5904', 'Andrei Teodorescu'],
       ['/live', 'Live Activity'],
       ['/contributors', 'Founding Contributor'],
       ['/u/elena-rostova-demo', 'GitHub Profile README Badge'],

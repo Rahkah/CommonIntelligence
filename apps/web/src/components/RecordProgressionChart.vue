@@ -3,17 +3,25 @@ import { computed } from 'vue';
 import type { RecordHistoryPoint } from '@common-intelligence/shared';
 import { useAppState } from '@/stores/appState';
 
-const props = defineProps<{
-  history: RecordHistoryPoint[];
-  targetValue?: number;
-  lowerBoundValue?: number;
-}>();
+const props = withDefaults(
+  defineProps<{
+    history: RecordHistoryPoint[];
+    targetValue?: number;
+    lowerBoundValue?: number;
+    direction?: 'higher' | 'lower';
+    unit?: string;
+  }>(),
+  {
+    direction: 'lower',
+    unit: '',
+  }
+);
 
 const { loc, state } = useAppState();
 
 const width = 680;
 const height = 220;
-const padLeft = 58;
+const padLeft = 64;
 const padRight = 32;
 const padTop = 24;
 const padBottom = 38;
@@ -22,9 +30,11 @@ const chartRange = computed(() => {
   const scores = props.history.map((h) => h.score);
   if (props.targetValue !== undefined) scores.push(props.targetValue);
   if (props.lowerBoundValue !== undefined) scores.push(props.lowerBoundValue);
-  const maxVal = Math.max(...scores) + 2;
-  const minVal = Math.min(...scores) - 2;
-  return { minVal, maxVal };
+  const rawMax = Math.max(...scores);
+  const rawMin = Math.min(...scores);
+  const span = Math.max(10, rawMax - rawMin);
+  const pad = Math.max(2, Math.round(span * 0.08));
+  return { minVal: rawMin - pad, maxVal: rawMax + pad };
 });
 
 function yFor(val: number): number {
@@ -58,10 +68,33 @@ const stepPolyline = computed(() => {
 });
 
 const yTicks = computed(() => {
-  const ticks = [5913, 5908, 5905, 5900, 5890, 5884].filter(
-    (v) => v <= chartRange.value.maxVal && v >= chartRange.value.minVal
-  );
-  return ticks;
+  const { minVal, maxVal } = chartRange.value;
+  const steps = 4;
+  const result: number[] = [];
+  for (let i = 0; i <= steps; i++) {
+    result.push(Math.round(minVal + ((maxVal - minVal) * i) / steps));
+  }
+  return result;
+});
+
+const targetLabel = computed(() => {
+  if (props.targetValue === undefined) return '';
+  const val = props.targetValue.toLocaleString();
+  if (props.direction === 'higher') {
+    return state.locale === 'zh'
+      ? `目标 > ${val} ${props.unit} (Stockfish 19)`
+      : `Target > ${val} ${props.unit} (Stockfish 19)`;
+  }
+  return state.locale === 'zh' ? `目标 ≤ ${val}` : `Target ≤ ${val}`;
+});
+
+const lowerLabel = computed(() => {
+  if (props.lowerBoundValue === undefined) return '';
+  const val = props.lowerBoundValue.toLocaleString();
+  if (props.direction === 'higher') {
+    return state.locale === 'zh' ? `初始基线 ${val} ${props.unit}` : `Baseline ${val} ${props.unit}`;
+  }
+  return state.locale === 'zh' ? `已证明下界 ${val}` : `Proven lower bound ${val}`;
 });
 </script>
 
@@ -74,7 +107,7 @@ const yTicks = computed(() => {
         :viewBox="`0 0 ${width} ${height}`"
         class="h-auto w-full min-w-[500px]"
         role="img"
-        aria-label="Historical superpermutation upper bound progression"
+        aria-label="Verified challenge score progression"
       >
         <!-- Horizontal grid lines & Y axis labels -->
         <g v-for="tick in yTicks" :key="tick">
@@ -113,11 +146,11 @@ const yTicks = computed(() => {
             text-anchor="end"
             class="fill-accent font-mono text-[9.5px] font-medium dark:fill-accent-dark"
           >
-            {{ state.locale === 'zh' ? `目标 ≤ ${targetValue.toLocaleString()}` : `Target ≤ ${targetValue.toLocaleString()}` }}
+            {{ targetLabel }}
           </text>
         </g>
 
-        <!-- Proven lower bound line -->
+        <!-- Lower bound / baseline line -->
         <g v-if="lowerBoundValue !== undefined">
           <line
             :x1="padLeft"
@@ -134,7 +167,7 @@ const yTicks = computed(() => {
             text-anchor="end"
             class="fill-ink-muted font-mono text-[9.5px] dark:fill-chalk-muted"
           >
-            {{ state.locale === 'zh' ? `已证明下界 ${lowerBoundValue.toLocaleString()}` : `Proven lower bound ${lowerBoundValue.toLocaleString()}` }}
+            {{ lowerLabel }}
           </text>
         </g>
 
@@ -187,7 +220,9 @@ const yTicks = computed(() => {
         >
           <tr>
             <th class="px-3.5 py-2">{{ state.locale === 'zh' ? '日期' : 'Date' }}</th>
-            <th class="px-3.5 py-2">{{ state.locale === 'zh' ? '长度' : 'Length' }}</th>
+            <th class="px-3.5 py-2">
+              {{ direction === 'higher' ? (state.locale === 'zh' ? '棋力' : 'Rating') : (state.locale === 'zh' ? '长度' : 'Length') }}
+            </th>
             <th class="px-3.5 py-2">{{ state.locale === 'zh' ? '归属与来源' : 'Attribution' }}</th>
             <th class="px-3.5 py-2">{{ state.locale === 'zh' ? '方法说明' : 'Method Note' }}</th>
           </tr>
@@ -203,7 +238,7 @@ const yTicks = computed(() => {
             </td>
             <td class="whitespace-nowrap px-3.5 py-2.5 font-mono font-semibold tabular-nums">
               <span :class="item.isCurrentRecord ? 'text-accent dark:text-accent-dark' : 'text-ink dark:text-chalk'">
-                {{ item.score.toLocaleString() }}
+                {{ item.score.toLocaleString() }}{{ unit ? ` ${unit}` : '' }}
               </span>
             </td>
             <td class="px-3.5 py-2.5 font-medium text-ink dark:text-chalk">

@@ -36,7 +36,7 @@ const form = reactive({
   ] as AgentTokenScope[],
 });
 
-const joinInstruction = `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/project-5904/join.txt to join the Common Intelligence experiment.`;
+const joinInstruction = `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/grandmaster/join.txt to join the Common Intelligence experiment.`;
 
 async function loadTokens() {
   loading.value = true;

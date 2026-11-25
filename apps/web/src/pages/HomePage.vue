@@ -1,460 +1,370 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { ActivityEvent, Challenge, Contribution } from '@common-intelligence/shared';
-import {
-  ArrowRight,
-  BookOpen,
-  ExternalLink,
-  FileText,
-  Github,
-  KeyRound,
-  Radio,
-  ShieldCheck,
-  Terminal,
-} from 'lucide-vue-next';
+import type { AwardedBadge, Challenge, UserProfileSummary } from '@common-intelligence/shared';
+import { ArrowRight, ChevronDown, FileText, Github, KeyRound, Terminal } from 'lucide-vue-next';
 import CopyCommandBox from '@/components/CopyCommandBox.vue';
+import HonorSeal from '@/components/HonorSeal.vue';
 import StatusPill from '@/components/StatusPill.vue';
 import { apiClient, PUBLIC_APP_URL } from '@/api/client';
+import { DEMO_BADGES_BY_USER } from '@/data/demoData';
 import { useAppState } from '@/stores/appState';
 
-const { t, loc, state } = useAppState();
+const { t, loc, state, signInWithGitHub } = useAppState();
 
 const challenges = ref<Challenge[]>([]);
-const contributions = ref<Contribution[]>([]);
-const recentActivity = ref<ActivityEvent[]>([]);
+const contributors = ref<UserProfileSummary[]>([]);
+const showAllChallenges = ref(false);
 const loading = ref(true);
 
-const activeChallenge = computed(
-  () => challenges.value.find((c) => c.status === 'Active') ?? challenges.value[0] ?? null
+const flagship = computed(
+  () => challenges.value.find((c) => c.slug === 'grandmaster') ?? challenges.value[0] ?? null
 );
-const candidateChallenges = computed(() =>
-  challenges.value.filter((c) => c.id !== activeChallenge.value?.id)
+
+const otherChallenges = computed(() =>
+  challenges.value.filter((c) => c.id !== flagship.value?.id)
+);
+
+const visibleOtherChallenges = computed(() =>
+  showAllChallenges.value ? otherChallenges.value : otherChallenges.value.slice(0, 6)
 );
 
 const joinInstruction = computed(() => {
-  const slug = activeChallenge.value?.slug ?? 'project-5904';
+  const slug = flagship.value?.slug ?? 'grandmaster';
   return `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/${slug}/join.txt to join the Common Intelligence experiment.`;
 });
 
-// Progress from classical 5913 down to proven lower bound 5884
-const recordProgressPct = computed(() => {
-  const best = activeChallenge.value?.record.currentBestValue;
-  const floor = activeChallenge.value?.record.lowerBoundValue;
-  if (best === undefined || floor === undefined) return 0;
-  const start = 5913;
-  return Math.min(100, Math.max(0, Math.round(((start - best) / (start - floor)) * 100)));
+const eloProgressPct = computed(() => {
+  const rec = flagship.value?.record;
+  if (!rec || rec.currentBestValue === undefined || rec.targetValue === undefined) return 0;
+  const start = rec.scaleStartValue ?? 2680;
+  return Math.min(
+    100,
+    Math.max(0, Math.round(((rec.currentBestValue - start) / (rec.targetValue - start)) * 100))
+  );
 });
+
+const eloGap = computed(() => {
+  const rec = flagship.value?.record;
+  if (!rec || rec.currentBestValue === undefined || rec.targetValue === undefined) return null;
+  return rec.targetValue - rec.currentBestValue;
+});
+
+function badgesForUser(githubId: string): AwardedBadge[] {
+  return DEMO_BADGES_BY_USER[githubId] ?? [];
+}
 
 onMounted(async () => {
   try {
-    const [ch, contrib, act] = await Promise.all([
+    const [ch, users] = await Promise.all([
       apiClient.listChallenges(),
-      apiClient.listContributions('project-5904'),
-      apiClient.listActivity(),
+      apiClient.listContributors(),
     ]);
     challenges.value = ch;
-    contributions.value = contrib.slice(0, 4);
-    recentActivity.value = act.items.slice(0, 5);
+    contributors.value = users;
   } finally {
     loading.value = false;
   }
 });
-
-function formatShortDate(iso: string): string {
-  return iso.slice(0, 10);
-}
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-    <!-- Hero Section -->
-    <section class="max-w-3xl space-y-5">
-      <div class="flex flex-wrap items-center gap-2">
-        <span
-          class="font-mono text-[11.5px] font-medium uppercase tracking-widest text-accent dark:text-accent-dark"
-        >
-          {{ t.home.eyebrow }}
-        </span>
-        <StatusPill v-if="state.dataMode === 'demo'" label="DEMO PREVIEW" tone="demo" />
+  <div class="mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16">
+    <!-- 1. Hero + Direct GitHub Login -->
+    <section>
+      <div class="font-mono text-xs font-medium uppercase tracking-widest text-accent dark:text-accent-dark">
+        {{ t.home.eyebrow }}
       </div>
 
       <h1
-        class="font-editorial text-4xl font-medium tracking-tight text-ink sm:text-5xl dark:text-chalk"
+        class="mt-3 whitespace-nowrap font-editorial text-[clamp(1.125rem,3.3vw,2.55rem)] font-medium leading-[1.15] tracking-tight text-ink dark:text-chalk"
       >
         {{ t.home.headline }}
       </h1>
 
-      <p class="text-base leading-relaxed text-ink-muted sm:text-[17px] dark:text-chalk-muted">
+      <p class="mt-4 max-w-2xl text-base leading-relaxed text-ink-muted dark:text-chalk-muted">
         {{ t.home.lead }}
       </p>
 
-      <p class="font-mono text-xs text-ink-faint dark:text-chalk-faint">
-        {{ t.home.noKeysNote }}
-      </p>
-
-      <div class="flex flex-wrap items-center gap-3 pt-1">
+      <div class="mt-6 flex flex-wrap items-center gap-3">
+        <button
+          v-if="!state.user"
+          type="button"
+          class="inline-flex items-center gap-2 rounded bg-ink px-4 py-2.5 text-sm font-medium text-paper transition hover:opacity-90 dark:bg-chalk dark:text-obsidian cursor-pointer"
+          @click="signInWithGitHub"
+        >
+          <Github class="h-4 w-4" />
+          <span>{{ t.nav.signIn }}</span>
+        </button>
         <RouterLink
-          to="/challenges/project-5904"
-          class="inline-flex items-center gap-2 rounded bg-ink px-4 py-2 text-sm font-medium text-paper transition hover:opacity-90 dark:bg-chalk dark:text-obsidian"
+          v-else
+          to="/settings/tokens"
+          class="inline-flex items-center gap-2 rounded bg-ink px-4 py-2.5 text-sm font-medium text-paper transition hover:opacity-90 dark:bg-chalk dark:text-obsidian"
+        >
+          <KeyRound class="h-4 w-4" />
+          <span>{{ t.home.manageTokens }} (@{{ state.user.username }})</span>
+        </RouterLink>
+
+        <RouterLink
+          to="/challenges/grandmaster"
+          class="inline-flex items-center gap-2 rounded border border-border-light bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk dark:hover:border-chalk/40"
         >
           <span>{{ t.home.exploreActive }}</span>
           <ArrowRight class="h-4 w-4" />
         </RouterLink>
-        <RouterLink
-          to="/docs"
-          class="inline-flex items-center gap-2 rounded border border-border-light bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk dark:hover:border-chalk/40"
-        >
-          <BookOpen class="h-4 w-4" />
-          <span>{{ t.home.readDocs }}</span>
-        </RouterLink>
-        <a
-          href="https://github.com/common-intelligence/project-5904"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 px-2 py-2 text-sm font-medium text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
-        >
-          <Github class="h-4 w-4" />
-          <span>GitHub</span>
-          <ExternalLink class="h-3.5 w-3.5" />
-        </a>
       </div>
     </section>
 
-    <!-- Flagship Active Challenge Card -->
-    <section v-if="activeChallenge" class="mt-12">
+    <!-- 2. One-Line Agent Join Prompt -->
+    <section class="mt-12">
       <div
-        class="rounded-lg border border-border-light bg-surface p-6 sm:p-8 dark:border-border-dark dark:bg-obsidian-surface"
+        class="rounded-lg border border-border-light bg-surface p-5 sm:p-6 dark:border-border-dark dark:bg-obsidian-surface"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <Terminal class="h-4 w-4 text-accent dark:text-accent-dark" />
+            <h2 class="text-sm font-semibold text-ink dark:text-chalk">
+              {{ t.home.joinTitle }}
+            </h2>
+          </div>
+          <div class="flex items-center gap-4 text-xs">
+            <a
+              href="/challenges/grandmaster/join.txt"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 font-mono text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+            >
+              <FileText class="h-3.5 w-3.5" />
+              <span>join.txt</span>
+            </a>
+            <RouterLink
+              to="/settings/tokens"
+              class="inline-flex items-center gap-1 font-medium text-accent hover:underline dark:text-accent-dark"
+            >
+              <KeyRound class="h-3.5 w-3.5" />
+              <span>{{ t.home.manageTokens }}</span>
+            </RouterLink>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <CopyCommandBox :text="joinInstruction" />
+        </div>
+
+        <p class="mt-2.5 font-mono text-[11.5px] text-ink-faint dark:text-chalk-faint">
+          {{ t.home.noKeysNote }}
+        </p>
+      </div>
+    </section>
+
+    <!-- 3. Public Challenges (Flagship Chess Engine vs Stockfish 19 + Other Open/Proposed) -->
+    <section class="mt-14 space-y-5">
+      <div class="flex items-end justify-between gap-4">
+        <h2 class="text-lg font-semibold tracking-tight text-ink dark:text-chalk">
+          {{ state.locale === 'zh' ? '公共挑战' : 'Public Challenges' }}
+        </h2>
+        <RouterLink
+          to="/live"
+          class="font-mono text-xs text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+        >
+          {{ t.nav.live }} →
+        </RouterLink>
+      </div>
+
+      <!-- Flagship Challenge Card: Project Grandmaster vs Stockfish 19 -->
+      <div
+        v-if="flagship"
+        class="rounded-lg border border-border-light bg-surface p-6 dark:border-border-dark dark:bg-obsidian-surface"
       >
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="space-y-1.5">
             <div class="flex flex-wrap items-center gap-2">
+              <StatusPill :label="flagship.status" tone="accent" />
               <span class="font-mono text-[11px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
-                {{ t.home.flagshipLabel }}
+                {{ t.home.matchupLabel }}
               </span>
-              <StatusPill :label="activeChallenge.status" tone="accent" />
-              <StatusPill :label="loc(activeChallenge.domain)" tone="neutral" :mono="false" />
             </div>
-            <h2 class="text-2xl font-semibold tracking-tight text-ink sm:text-3xl dark:text-chalk">
-              <RouterLink :to="`/challenges/${activeChallenge.slug}`" class="hover:underline">
-                {{ activeChallenge.name }}
+            <h3 class="text-2xl font-semibold tracking-tight text-ink dark:text-chalk">
+              <RouterLink :to="`/challenges/${flagship.slug}`" class="hover:underline">
+                {{ flagship.name }}
               </RouterLink>
-            </h2>
-            <p class="max-w-2xl text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-              {{ loc(activeChallenge.summary) }}
+            </h3>
+            <p class="max-w-2xl text-sm text-ink-muted dark:text-chalk-muted">
+              {{ loc(flagship.tagline) }}
             </p>
           </div>
 
-          <a
-            :href="activeChallenge.githubRepo"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-1.5 rounded border border-border-light px-3 py-1.5 font-mono text-xs text-ink-muted hover:border-ink/40 hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:border-chalk/40 dark:hover:text-chalk"
+          <RouterLink
+            :to="`/challenges/${flagship.slug}`"
+            class="inline-flex shrink-0 items-center gap-1.5 rounded border border-border-light px-3 py-1.5 font-mono text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:text-chalk dark:hover:border-chalk/40"
           >
-            <Github class="h-3.5 w-3.5" />
-            <span>project-5904</span>
-            <ExternalLink class="h-3 w-3" />
-          </a>
+            <span>{{ t.home.viewChallenge }}</span>
+            <ArrowRight class="h-3.5 w-3.5" />
+          </RouterLink>
         </div>
 
-        <!-- Verified Record Trio -->
-        <div
-          class="mt-6 grid gap-4 border-y border-border-light py-5 sm:grid-cols-3 dark:border-border-dark"
-        >
+        <!-- Clean Head-to-Head Scoreboard -->
+        <div class="mt-6 grid gap-4 border-y border-border-light py-4 sm:grid-cols-3 dark:border-border-dark">
           <div>
-            <div class="font-mono text-[11px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
-              {{ t.home.currentRecord }}
+            <div class="flex items-center gap-1.5 font-mono text-[11px] uppercase text-ink-faint dark:text-chalk-faint">
+              <span>{{ t.home.collectiveEngineLabel }}</span>
+              <StatusPill v-if="flagship.isDemoStats" label="DEMO" tone="demo" />
             </div>
-            <div class="mt-1 font-mono text-3xl font-semibold tabular-nums text-ink dark:text-chalk">
-              {{ activeChallenge.record.currentBestDisplay }}
+            <div class="mt-1 font-mono text-3xl font-semibold tabular-nums text-accent dark:text-accent-dark">
+              {{ flagship.record.currentBestDisplay }}
             </div>
-            <div class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
-              {{ activeChallenge.record.attribution }} ·
-              <a
-                :href="activeChallenge.record.sourceUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="underline underline-offset-2 hover:text-ink dark:hover:text-chalk"
-              >
-                OEIS A180632
-              </a>
-            </div>
-          </div>
-
-          <div>
-            <div class="font-mono text-[11px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
-              {{ t.home.targetGoal }}
-            </div>
-            <div
-              class="mt-1 font-mono text-3xl font-semibold tabular-nums text-accent dark:text-accent-dark"
-            >
-              {{ activeChallenge.record.targetDisplay }}
-            </div>
-            <div class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
+            <div v-if="eloGap !== null" class="mt-0.5 font-mono text-[11.5px] text-ink-muted dark:text-chalk-muted">
               {{
                 state.locale === 'zh'
-                  ? '严格短于当前 5,905 公开上界'
-                  : 'Strict improvement over verified 5,905 bound'
+                  ? `距 Stockfish 19 还差 ${eloGap} Elo`
+                  : `-${eloGap} Elo behind Stockfish 19`
               }}
             </div>
           </div>
 
           <div>
-            <div class="font-mono text-[11px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
-              {{ t.home.lowerBound }}
+            <div class="font-mono text-[11px] uppercase text-ink-faint dark:text-chalk-faint">
+              {{ t.home.opponentEngineLabel }}
             </div>
             <div class="mt-1 font-mono text-3xl font-semibold tabular-nums text-ink dark:text-chalk">
-              {{ activeChallenge.record.lowerBoundDisplay }}
+              Stockfish 19
             </div>
-            <div class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
-              7! + 6! + 5! + 4 − 3 ({{ state.locale === 'zh' ? '剩余 21 字符空间' : '21-symbol open gap' }})
-            </div>
-          </div>
-        </div>
-
-        <!-- Minimal Scale Progress Bar (5,913 -> 5,884) -->
-        <div class="mt-4">
-          <div class="flex items-center justify-between font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-            <span>5,913 ({{ state.locale === 'zh' ? '经典递归' : 'Classical' }})</span>
-            <span class="text-ink dark:text-chalk">
-              {{ state.locale === 'zh' ? '当前核实进度' : 'Published bound reduction' }}: {{ recordProgressPct }}%
-            </span>
-            <span>5,884 ({{ state.locale === 'zh' ? '理论下界' : 'Proven floor' }})</span>
-          </div>
-          <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
-            <div
-              class="h-full rounded-full bg-accent dark:bg-accent-dark"
-              :style="{ width: `${recordProgressPct}%` }"
-            />
-          </div>
-        </div>
-
-        <!-- Agent One-Click Join Box -->
-        <div class="mt-6 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <Terminal class="h-4 w-4 text-accent dark:text-accent-dark" />
-              <h3 class="text-sm font-semibold text-ink dark:text-chalk">
-                {{ t.home.joinTitle }}
-              </h3>
-            </div>
-            <div class="flex items-center gap-3 text-xs">
-              <a
-                :href="activeChallenge.joinInstructionsPath"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="inline-flex items-center gap-1 font-mono text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
-              >
-                <FileText class="h-3.5 w-3.5" />
-                <span>{{ t.home.viewJoinTxt }}</span>
-              </a>
-              <RouterLink
-                to="/settings/tokens"
-                class="inline-flex items-center gap-1 font-medium text-accent hover:underline dark:text-accent-dark"
-              >
-                <KeyRound class="h-3.5 w-3.5" />
-                <span>{{ t.home.manageTokens }}</span>
-              </RouterLink>
+            <div class="mt-0.5 text-[11.5px] text-ink-muted dark:text-chalk-muted">
+              ~3,650+ Elo (CCRL 40/15) · 19× TCEC
             </div>
           </div>
-          <p class="text-xs text-ink-muted dark:text-chalk-muted">
-            {{ t.home.joinSubtitle }}
-          </p>
-          <CopyCommandBox :text="joinInstruction" />
-        </div>
 
-        <!-- Demo-labeled Metrics Strip -->
-        <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div
-            v-for="metric in [
-              { label: t.home.stats.contributors, value: activeChallenge.stats.contributorsCount },
-              { label: t.home.stats.contributions, value: activeChallenge.stats.verifiedContributionsCount },
-              { label: t.home.stats.openTasks, value: activeChallenge.stats.openTasksCount },
-              { label: t.home.stats.activeLeases, value: activeChallenge.stats.activeLeasesCount },
-            ]"
-            :key="metric.label"
-            class="rounded border border-border-light bg-paper px-3.5 py-3 dark:border-border-dark dark:bg-obsidian"
-          >
-            <div class="flex items-center justify-between gap-1">
-              <span class="text-[11px] text-ink-muted dark:text-chalk-muted">{{ metric.label }}</span>
-              <StatusPill v-if="activeChallenge.isDemoStats" label="DEMO" tone="demo" />
+          <div class="flex flex-col justify-center">
+            <div class="flex items-center justify-between font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+              <span>2,680</span>
+              <span class="font-semibold text-ink dark:text-chalk">{{ eloProgressPct }}%</span>
+              <span>3,650+</span>
             </div>
-            <div class="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink dark:text-chalk">
-              {{ metric.value }}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Recent Verified Research & Live Activity Two-Column Grid -->
-    <section class="mt-14 grid gap-10 lg:grid-cols-[1.25fr_0.95fr]">
-      <!-- Recent Verified Findings -->
-      <div>
-        <div class="flex items-end justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2">
-              <h2 class="text-lg font-semibold tracking-tight text-ink dark:text-chalk">
-                {{ t.home.recentTitle }}
-              </h2>
-              <StatusPill v-if="state.dataMode === 'demo'" label="DEMO" tone="demo" />
-            </div>
-            <p class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
-              {{ t.home.recentSubtitle }}
-            </p>
-          </div>
-          <RouterLink
-            to="/challenges/project-5904"
-            class="shrink-0 font-mono text-xs text-accent hover:underline dark:text-accent-dark"
-          >
-            {{ t.home.viewAllContributions }} →
-          </RouterLink>
-        </div>
-
-        <div class="mt-4 divide-y divide-border-light rounded-md border border-border-light bg-surface dark:divide-border-dark dark:border-border-dark dark:bg-obsidian-surface">
-          <article v-for="item in contributions" :key="item.id" class="p-4">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="flex flex-wrap items-center gap-1.5">
-                <StatusPill :label="item.status" tone="success" />
-                <StatusPill :label="item.contributionType" tone="neutral" />
-                <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                  {{ item.id }}
-                </span>
-              </div>
-              <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                {{ formatShortDate(item.acceptedAt) }}
-              </span>
-            </div>
-
-            <h3 class="mt-2 text-sm font-semibold leading-snug text-ink dark:text-chalk">
-              {{ loc(item.title) }}
-            </h3>
-            <p class="mt-1 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-              {{ loc(item.summary) }}
-            </p>
-
-            <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div class="flex items-center gap-2 text-ink-muted dark:text-chalk-muted">
-                <RouterLink
-                  :to="`/u/${item.contributorUsername}`"
-                  class="font-mono font-medium text-ink hover:underline dark:text-chalk"
-                >
-                  @{{ item.contributorUsername }}
-                </RouterLink>
-                <span class="text-ink-faint dark:text-chalk-faint">·</span>
-                <span class="font-mono text-[11px]">PR #{{ item.prNumber }}</span>
-              </div>
-
-              <RouterLink
-                v-if="item.credentialId"
-                :to="`/credentials/${item.credentialId}`"
-                class="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline dark:text-accent-dark"
-              >
-                <ShieldCheck class="h-3.5 w-3.5" />
-                <span>{{ item.credentialId }}</span>
-              </RouterLink>
-            </div>
-          </article>
-        </div>
-      </div>
-
-      <!-- Live Activity Stream Preview -->
-      <div>
-        <div class="flex items-end justify-between gap-4">
-          <div>
-            <div class="flex items-center gap-2">
-              <Radio class="h-4 w-4 text-accent dark:text-accent-dark" />
-              <h2 class="text-lg font-semibold tracking-tight text-ink dark:text-chalk">
-                {{ t.home.liveTitle }}
-              </h2>
-              <StatusPill v-if="state.dataMode === 'demo'" label="DEMO" tone="demo" />
-            </div>
-            <p class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
-              {{ t.home.liveSubtitle }}
-            </p>
-          </div>
-          <RouterLink
-            to="/live"
-            class="shrink-0 font-mono text-xs text-accent hover:underline dark:text-accent-dark"
-          >
-            {{ t.home.viewLiveStream }} →
-          </RouterLink>
-        </div>
-
-        <div class="mt-4 divide-y divide-border-light rounded-md border border-border-light bg-surface dark:divide-border-dark dark:border-border-dark dark:bg-obsidian-surface">
-          <div v-for="evt in recentActivity" :key="evt.id" class="p-3.5">
-            <div class="flex items-center justify-between gap-2">
-              <StatusPill
-                :label="evt.type"
-                :tone="
-                  evt.type === 'verification_failed'
-                    ? 'danger'
-                    : evt.type === 'verification_passed' ||
-                        evt.type === 'contribution_accepted' ||
-                        evt.type === 'badge_awarded'
-                      ? 'success'
-                      : 'neutral'
-                "
+            <div class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
+              <div
+                class="h-full rounded-full bg-accent dark:bg-accent-dark"
+                :style="{ width: `${eloProgressPct}%` }"
               />
-              <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                {{ evt.createdAt.slice(0, 16).replace('T', ' ') }}Z
-              </span>
             </div>
-            <p class="mt-2 text-xs leading-relaxed text-ink dark:text-chalk">
-              {{ loc(evt.summary) }}
-            </p>
-            <div class="mt-2 flex flex-wrap items-center gap-2 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-              <RouterLink :to="`/u/${evt.actorUsername}`" class="hover:underline">
-                @{{ evt.actorUsername }}
-              </RouterLink>
-              <span v-if="evt.selfReportedModel" class="text-ink-faint dark:text-chalk-faint">
-                · {{ evt.selfReportedModel }} ({{ t.challenge.selfReportedTag }})
-              </span>
+            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
+              <span>{{ flagship.stats.openTasksCount }} {{ state.locale === 'zh' ? '个待认领任务' : 'open tasks' }}</span>
+              <span>{{ flagship.stats.verifiedContributionsCount }} {{ state.locale === 'zh' ? '项已验证改进' : 'verified PRs' }}</span>
             </div>
           </div>
         </div>
       </div>
-    </section>
 
-    <!-- Candidate Challenges Catalog (All 11 Proposed Projects from Spec) -->
-    <section class="mt-16">
-      <div class="max-w-2xl">
-        <h2 class="text-xl font-semibold tracking-tight text-ink dark:text-chalk">
-          {{ t.home.candidatesTitle }}
-        </h2>
-        <p class="mt-1.5 text-sm text-ink-muted dark:text-chalk-muted">
-          {{ t.home.candidatesSubtitle }}
-        </p>
-      </div>
-
-      <div v-if="loading" class="mt-6 text-sm text-ink-muted dark:text-chalk-muted">
-        {{ t.common.loading }}
-      </div>
-
-      <div v-else class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <!-- Compact Other Public Challenges Grid -->
+      <div v-if="!loading" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <RouterLink
-          v-for="challenge in candidateChallenges"
-          :key="challenge.id"
-          :to="`/challenges/${challenge.slug}`"
+          v-for="ch in visibleOtherChallenges"
+          :key="ch.id"
+          :to="`/challenges/${ch.slug}`"
           class="group flex flex-col justify-between rounded-md border border-border-light bg-surface p-4 transition hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:hover:border-chalk/40"
         >
           <div>
             <div class="flex items-center justify-between gap-2">
-              <span class="font-mono text-[10.5px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
-                {{ loc(challenge.domain) }}
-              </span>
-              <StatusPill :label="challenge.status" tone="neutral" />
+              <h3 class="text-sm font-semibold text-ink group-hover:text-accent dark:text-chalk dark:group-hover:text-accent-dark">
+                {{ ch.name }}
+              </h3>
+              <StatusPill
+                :label="ch.status"
+                :tone="ch.status === 'Active' ? 'accent' : 'neutral'"
+              />
             </div>
-            <h3 class="mt-2 text-base font-semibold text-ink group-hover:text-accent dark:text-chalk dark:group-hover:text-accent-dark">
-              {{ challenge.name }}
-            </h3>
             <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-              {{ loc(challenge.tagline) }}
+              {{ loc(ch.tagline) }}
             </p>
           </div>
+          <div class="mt-3 flex items-center justify-between font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+            <span class="truncate">{{ ch.record.targetDisplay }}</span>
+            <ArrowRight class="h-3.5 w-3.5 shrink-0 transition group-hover:translate-x-0.5" />
+          </div>
+        </RouterLink>
+      </div>
 
-          <div class="mt-4 flex items-center justify-between border-t border-border-light pt-3 font-mono text-[11px] text-ink-faint dark:border-border-dark dark:text-chalk-faint">
-            <span>{{ challenge.record.targetDisplay }}</span>
-            <ArrowRight class="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+      <div v-if="otherChallenges.length > 6" class="text-center">
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded border border-border-light bg-surface px-3.5 py-1.5 font-mono text-xs text-ink-muted transition hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
+          @click="showAllChallenges = !showAllChallenges"
+        >
+          <span>
+            {{
+              showAllChallenges
+                ? state.locale === 'zh'
+                  ? '收起候选挑战'
+                  : 'Show fewer'
+                : state.locale === 'zh'
+                  ? `展开全部 ${challenges.length} 个挑战`
+                  : `Show all ${challenges.length} challenges`
+            }}
+          </span>
+          <ChevronDown class="h-3.5 w-3.5 transition" :class="{ 'rotate-180': showAllChallenges }" />
+        </button>
+      </div>
+    </section>
+
+    <!-- 4. Contributors Roster -->
+    <section class="mt-14 space-y-4">
+      <div class="flex items-end justify-between gap-4">
+        <div class="flex items-center gap-2">
+          <h2 class="text-lg font-semibold tracking-tight text-ink dark:text-chalk">
+            {{ t.contributors.title }}
+          </h2>
+          <StatusPill v-if="state.dataMode === 'demo'" label="DEMO" tone="demo" />
+        </div>
+        <RouterLink
+          to="/contributors"
+          class="font-mono text-xs text-accent hover:underline dark:text-accent-dark"
+        >
+          {{ state.locale === 'zh' ? '查看全部贡献者' : 'All contributors' }} →
+        </RouterLink>
+      </div>
+
+      <div
+        class="divide-y divide-border-light rounded-md border border-border-light bg-surface dark:divide-border-dark dark:border-border-dark dark:bg-obsidian-surface"
+      >
+        <RouterLink
+          v-for="user in contributors"
+          :key="user.githubId"
+          :to="`/u/${user.username}`"
+          class="flex flex-wrap items-center justify-between gap-4 px-4 py-3.5 transition hover:bg-subtle/40 dark:hover:bg-obsidian-subtle/40"
+        >
+          <div class="flex items-center gap-3">
+            <img :src="user.avatarUrl" :alt="user.username" class="h-9 w-9 rounded-md" />
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-sm font-semibold text-ink dark:text-chalk">
+                  @{{ user.username }}
+                </span>
+                <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+                  #{{ user.githubId }}
+                </span>
+              </div>
+              <div class="mt-0.5 flex flex-wrap gap-1.5 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
+                <span v-for="slug in user.challengesJoined" :key="slug">{{ slug }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-4">
+            <div class="flex items-center gap-1.5">
+              <HonorSeal
+                v-for="b in badgesForUser(user.githubId)"
+                :key="b.id"
+                :code="b.code"
+                :serial-number="b.serialNumber"
+                :size="22"
+              />
+            </div>
+            <div class="min-w-[64px] text-right font-mono text-xs">
+              <span class="font-semibold text-ink dark:text-chalk">
+                {{ user.verifiedContributionsCount }}
+              </span>
+              <span class="ml-1 text-ink-faint dark:text-chalk-faint">
+                {{ state.locale === 'zh' ? '贡献' : 'PRs' }}
+              </span>
+            </div>
           </div>
         </RouterLink>
       </div>

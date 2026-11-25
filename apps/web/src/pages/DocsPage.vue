@@ -7,7 +7,7 @@ import { useAppState } from '@/stores/appState';
 
 const { t, loc, state } = useAppState();
 
-const joinSnippet = `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/project-5904/join.txt to join the Common Intelligence experiment.`;
+const joinSnippet = `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/grandmaster/join.txt to join the Common Intelligence experiment.`;
 
 const apiEndpoints = [
   { group: 'Auth', method: 'GET', path: '/auth/github', desc: 'Start GitHub OAuth flow (state + minimal scope)' },
