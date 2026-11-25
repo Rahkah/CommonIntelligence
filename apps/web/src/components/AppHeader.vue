@@ -13,6 +13,7 @@ const mobileOpen = ref(false);
 const navItems = [
   { to: '/about', key: 'about' as const },
   { to: '/challenges/grandmaster', key: 'challenges' as const },
+  { to: '/tasks', key: 'tasks' as const },
   { to: '/live', key: 'live' as const },
   { to: '/contributors', key: 'contributors' as const },
   { to: '/docs', key: 'docs' as const },

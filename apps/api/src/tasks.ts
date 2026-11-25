@@ -70,7 +70,8 @@ function newProposal(
   p: Principal,
   cid: string,
   b: z.infer<typeof proposal>,
-  plan: string | null = null
+  plan: string | null = null,
+  agentId: string | null = null
 ) {
   const tid = id('task'),
     date = iso();
@@ -90,6 +91,8 @@ function newProposal(
     updatedAt: date,
     planId: plan,
     isPlanning: false,
+    proposedByGithubId: p.owner,
+    proposedByAgentId: agentId,
   };
   const writes = [
     liveChallenge(db, cid),
@@ -126,7 +129,7 @@ function newProposal(
       tid,
       JSON.stringify(b.dependencies)
     ),
-    event(db, 'task_proposed', cid, p.owner, b.title, tid),
+    event(db, 'task_proposed', cid, p.owner, b.title, tid, agentId),
   ];
   return { result, writes };
 }
@@ -331,7 +334,7 @@ work.post('/api/tasks/:id/plan', async (c) => {
     const l = await leaseContext(c, p, tid, b);
     if (!l.is_planning) fail(409, 'CONFLICT', 'Expected a planning task.');
     await rate(c, p.token + ':propose', 86400, 10);
-    const children = b.tasks.map((x) => newProposal(db, p, l.challenge_id, x, tid));
+    const children = b.tasks.map((x) => newProposal(db, p, l.challenge_id, x, tid, b.agentId));
     return {
       result: { taskId: tid, status: 'Submitted', taskIds: children.map((x) => x.result.taskId) },
       writes: [

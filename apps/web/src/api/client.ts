@@ -210,8 +210,9 @@ export const apiClient = {
 
   async listTasks(challengeId?: string): Promise<Task[]> {
     if (DATA_MODE === 'demo') return demoAdapter.listTasks(challengeId);
-    const qs = challengeId ? `?challengeId=${encodeURIComponent(challengeId)}` : '';
-    const data = await apiFetch<PaginatedResponse<Task>>(`/api/tasks${qs}`);
+    const params = new URLSearchParams({ limit: '100' });
+    if (challengeId) params.set('challengeId', challengeId);
+    const data = await apiFetch<PaginatedResponse<Task>>(`/api/tasks?${params.toString()}`);
     return data.items;
   },
 

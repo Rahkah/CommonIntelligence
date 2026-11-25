@@ -6,7 +6,7 @@ import {
   type BadgeCode,
   type ContributorFullProfile,
 } from '@common-intelligence/shared';
-import { ExternalLink, Github, KeyRound, ShieldCheck } from 'lucide-vue-next';
+import { ExternalLink, GitBranch, Github, KeyRound, ShieldCheck } from 'lucide-vue-next';
 import CopyCommandBox from '@/components/CopyCommandBox.vue';
 import HonorSeal from '@/components/HonorSeal.vue';
 import StatusPill from '@/components/StatusPill.vue';
@@ -117,6 +117,13 @@ watch(
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+          <RouterLink
+            :to="`/tasks?contributor=${encodeURIComponent(profile.user.username)}&view=contributors`"
+            class="inline-flex items-center gap-1.5 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
+          >
+            <GitBranch class="h-3.5 w-3.5 text-accent dark:text-accent-dark" />
+            <span>{{ t.scheduler.viewInScheduler }}</span>
+          </RouterLink>
           <RouterLink
             v-if="isOwnProfile"
             to="/settings/tokens"

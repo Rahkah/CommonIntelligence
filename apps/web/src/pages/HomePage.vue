@@ -190,6 +190,9 @@ onMounted(() => {
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-4">
+          <RouterLink to="/tasks" class="project-link">
+            {{ t.nav.tasks }} →
+          </RouterLink>
           <RouterLink to="/live" class="project-link">
             {{ t.nav.live }} →
           </RouterLink>

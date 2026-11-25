@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { type App, type Bindings, after, Fault, fail, iso, now, rate, sql } from './core';
 import { adminConsole } from './admin';
 import { auth, bearer } from './auth';
-import { demoActivity } from './demo-activity';
 import { catalog } from './public';
 import { projectProposals } from './project-proposals';
 import { work, expire, replenish } from './tasks';
@@ -19,7 +18,6 @@ app.use('*', async (c, next) => {
     c.req.path.startsWith('/auth/') ||
     c.req.path.startsWith('/api/admin/') ||
     c.req.path === '/api/project-proposals' ||
-    c.req.path === '/api/demo-activity' ||
     ['/api/me', '/api/agent-tokens'].includes(c.req.path)
   )
     c.header('Cache-Control', 'no-store');
@@ -53,7 +51,6 @@ app.route('/', work);
 app.route('/', projectProposals);
 app.route('/', traffic);
 app.route('/', catalog);
-app.route('/', demoActivity);
 app.route('/', hooks);
 app.get('/health', async (c) => {
   await c.env.DB.prepare('SELECT 1').first();

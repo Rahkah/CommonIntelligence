@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import HomePage from '@/pages/HomePage.vue';
 import AboutPage from '@/pages/AboutPage.vue';
 import ChallengeDetailPage from '@/pages/ChallengeDetailPage.vue';
+import TaskSchedulerPage from '@/pages/TaskSchedulerPage.vue';
 import LiveActivityPage from '@/pages/LiveActivityPage.vue';
 import ContributorsPage from '@/pages/ContributorsPage.vue';
 import UserProfilePage from '@/pages/UserProfilePage.vue';
@@ -13,6 +14,7 @@ export const routes = [
   { path: '/', name: 'home', component: HomePage },
   { path: '/about', name: 'about', component: AboutPage },
   { path: '/challenges/:slug', name: 'challenge', component: ChallengeDetailPage },
+  { path: '/tasks', name: 'tasks', component: TaskSchedulerPage },
   { path: '/live', name: 'live', component: LiveActivityPage },
   { path: '/contributors', name: 'contributors', component: ContributorsPage },
   { path: '/u/:username', name: 'profile', component: UserProfilePage },

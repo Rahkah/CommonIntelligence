@@ -20,10 +20,26 @@ export const tasks = `SELECT t.task_id taskId,t.challenge_id challengeId,t.title
   t.task_type taskType,t.priority,t.status,(SELECT json_group_array(depends_on_task_id) FROM task_dependencies WHERE task_id=t.task_id) dependenciesJson,
   t.required_capabilities_json requiredCapabilitiesJson,t.acceptance_criteria_json acceptanceCriteriaJson,t.input_artifacts_json inputArtifactsJson,
   t.output_requirements_json outputRequirementsJson,t.assigned_agent_id assignedAgentId,a.label assignedAgentLabel,
-  a.self_reported_model assignedAgentModelSelfReported,u.username assignedUserUsername,t.lease_expires_at leaseExpiresAt,
+  a.self_reported_model assignedAgentModelSelfReported,u.username assignedUserUsername,u.avatar_url assignedUserAvatarUrl,
+  coalesce(t.proposed_by_github_id,pa.owner_github_id) proposedByGithubId,
+  coalesce(pu.username,pau.username) proposedByUsername,
+  coalesce(pu.avatar_url,pau.avatar_url) proposedByAvatarUrl,
+  pa.id proposedByAgentId,pa.label proposedByAgentLabel,pa.self_reported_model proposedByAgentModelSelfReported,
+  coalesce(c.contributor_github_id,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN a.owner_github_id END) completedByGithubId,
+  coalesce(cu.username,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN u.username END) completedByUsername,
+  coalesce(cu.avatar_url,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN u.avatar_url END) completedByAvatarUrl,
+  coalesce(CASE WHEN t.status='Accepted' THEN a.label END,(SELECT ag.label FROM task_attempts ta JOIN agents ag ON ag.id=ta.agent_id WHERE ta.task_id=t.task_id AND ta.outcome='accepted' ORDER BY ta.created_at DESC LIMIT 1)) completedByAgentLabel,
+  coalesce(c.self_reported_agent_model,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN a.self_reported_model END) completedByAgentModelSelfReported,
+  coalesce(c.accepted_at,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN t.updated_at END) completedAt,
+  c.id contributionId,cr.id credentialId,
+  t.lease_expires_at leaseExpiresAt,
   (SELECT pr_url FROM pull_requests WHERE task_id=t.task_id ORDER BY created_at DESC LIMIT 1) prUrl,
   CASE t.is_planning WHEN 1 THEN 'true' ELSE 'false' END isPlanningJson,t.plan_id planId,t.created_at createdAt,t.updated_at updatedAt FROM tasks t
-  LEFT JOIN agents a ON a.id=t.assigned_agent_id LEFT JOIN users u ON u.github_id=a.owner_github_id`;
+  LEFT JOIN agents a ON a.id=t.assigned_agent_id LEFT JOIN users u ON u.github_id=a.owner_github_id
+  LEFT JOIN users pu ON pu.github_id=t.proposed_by_github_id
+  LEFT JOIN tasks pt ON pt.task_id=t.plan_id LEFT JOIN agents pa ON pa.id=pt.assigned_agent_id LEFT JOIN users pau ON pau.github_id=pa.owner_github_id
+  LEFT JOIN contributions c ON c.task_id=t.task_id LEFT JOIN users cu ON cu.github_id=c.contributor_github_id
+  LEFT JOIN credentials cr ON cr.contribution_id=c.id`;
 
 export const challenges = `SELECT c.id,slug,name,status,c.created_at createdAt,domain_json domainJson,tagline_json taglineJson,summary_json summaryJson,
   background_json backgroundJson,ultimate_goal_json ultimateGoalJson,record_info_json recordJson,record_history_json recordHistoryJson,

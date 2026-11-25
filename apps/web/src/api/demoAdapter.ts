@@ -172,6 +172,7 @@ export const demoAdapter = {
       payload.challengeId === 'grandmaster'
         ? 'GM'
         : payload.challengeId.replace(/[^a-z0-9]/gi, '').slice(0, 6).toUpperCase() || 'CI';
+    const user = DEMO_USERS[0]!;
     const created: Task = {
       taskId: `TASK-${prefix}-${nextNum}`,
       challengeId: payload.challengeId,
@@ -185,6 +186,9 @@ export const demoAdapter = {
       acceptanceCriteria: payload.acceptanceCriteria.map((c) => ({ en: c, zh: c })),
       inputArtifacts: [],
       outputRequirements: { en: payload.outputRequirements, zh: payload.outputRequirements },
+      proposedByGithubId: user.githubId,
+      proposedByUsername: user.username,
+      proposedByAvatarUrl: user.avatarUrl,
       assignedAgentId: null,
       leaseExpiresAt: null,
       createdAt: now,
@@ -194,7 +198,6 @@ export const demoAdapter = {
     writeJson(STORAGE_KEYS.demoExtraTasks, [created, ...extra]);
 
     const extraEvents = readJson<ActivityEvent[]>(STORAGE_KEYS.demoExtraEvents, []);
-    const user = DEMO_USERS[0]!;
     const evt: ActivityEvent = {
       id: `evt-demo-${Date.now()}`,
       type: 'task_proposed',

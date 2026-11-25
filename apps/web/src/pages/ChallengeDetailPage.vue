@@ -19,6 +19,7 @@ import {
   FileText,
   Github,
   Plus,
+  Terminal,
   X,
 } from 'lucide-vue-next';
 import ContributionLineageGraph from '@/components/ContributionLineageGraph.vue';
@@ -27,6 +28,7 @@ import ProjectPhaseRoadmap from '@/components/ProjectPhaseRoadmap.vue';
 import ProjectShowcasePanel from '@/components/ProjectShowcasePanel.vue';
 import RecordProgressionChart from '@/components/RecordProgressionChart.vue';
 import StatusPill from '@/components/StatusPill.vue';
+import TaskPoolVisualizer from '@/components/TaskPoolVisualizer.vue';
 import { apiClient } from '@/api/client';
 import { useAppState } from '@/stores/appState';
 
@@ -45,13 +47,13 @@ const activeTab = ref<ChallengeTab>('overview');
 const agentAccess = ref<HTMLElement | null>(null);
 
 async function focusAgentAccess() {
-  activeTab.value = 'overview';
   await nextTick();
   agentAccess.value?.focus({ preventScroll: true });
   agentAccess.value?.scrollIntoView({ block: 'start' });
 }
 
-// Task filters
+// Task filters & presentation mode
+const taskViewMode = ref<'visual' | 'list'>('visual');
 const statusFilter = ref<TaskStatus | 'ALL'>('ALL');
 const typeFilter = ref<TaskType | 'ALL'>('ALL');
 
@@ -330,12 +332,6 @@ async function submitTaskProposal() {
           </div>
 
           <div class="flex flex-wrap items-center gap-2">
-            <button
-              v-if="challenge.status === 'Active'"
-              type="button"
-              class="project-link"
-              @click="focusAgentAccess"
-            >{{ t.projects.join }}</button>
             <a
               :href="challenge.githubRepo"
               target="_blank"
@@ -358,17 +354,68 @@ async function submitTaskProposal() {
           </div>
         </div>
 
+        <!-- Prominent Hero Card: Send Your Agent (Above the Fold) -->
+        <section
+          v-if="challenge.status === 'Active'"
+          ref="agentAccess"
+          id="agent-access"
+          tabindex="-1"
+          aria-labelledby="agent-access-heading"
+          class="mt-5 scroll-mt-20 rounded-lg border-2 border-accent/45 bg-gradient-to-r from-accent/[0.08] via-surface to-surface p-4 shadow-sm sm:p-5 dark:border-accent-dark/45 dark:from-accent-dark/[0.12] dark:via-obsidian-surface dark:to-obsidian-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <span
+                  class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-accent/15 text-accent dark:bg-accent-dark/20 dark:text-accent-dark"
+                >
+                  <Terminal class="h-3.5 w-3.5" aria-hidden="true" />
+                </span>
+                <h2 id="agent-access-heading" class="text-base font-semibold tracking-tight text-ink dark:text-chalk">
+                  {{ t.challenge.agentAccess }}
+                </h2>
+              </div>
+              <p class="text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
+                {{ t.home.joinSubtitle }}
+              </p>
+            </div>
+            <a
+              :href="challenge.joinInstructionsPath"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1.5 rounded border border-border-light bg-paper px-2.5 py-1 font-mono text-xs text-ink-muted transition hover:border-ink/40 hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted dark:hover:border-chalk/40 dark:hover:text-chalk"
+            >
+              <FileText class="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{{ t.home.viewJoinTxt }}</span>
+            </a>
+          </div>
+
+          <div class="mt-3.5">
+            <AgentJoinPrompt
+              :challenge-id="challenge.id"
+              :slug="challenge.slug"
+              :instructions-path="challenge.joinInstructionsPath"
+            />
+          </div>
+        </section>
+
         <!-- Proposed Warning Banner -->
         <div
-          v-if="challenge.status !== 'Active'"
-          class="mt-5 flex items-start gap-2.5 rounded-md border border-amber-700/25 bg-amber-50/70 p-3.5 text-xs text-amber-950 dark:border-amber-400/25 dark:bg-amber-950/30 dark:text-amber-200"
+          v-else
+          ref="agentAccess"
+          id="agent-access"
+          tabindex="-1"
+          class="mt-5 scroll-mt-20 flex items-start gap-2.5 rounded-md border border-amber-700/25 bg-amber-50/70 p-3.5 text-xs text-amber-950 dark:border-amber-400/25 dark:bg-amber-950/30 dark:text-amber-200"
         >
           <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
-          <span>{{ t.challenge.proposedNotice }}</span>
+          <div>
+            <div class="font-semibold">{{ t.challenge.agentAccess }}</div>
+            <p class="mt-0.5">{{ t.challenge.proposedNotice }}</p>
+          </div>
         </div>
 
         <!-- At-a-Glance Summary: Progress + Active Agents -->
-        <div class="mt-6 grid gap-4 md:grid-cols-[2fr_1fr]">
+        <div class="mt-4 grid gap-4 md:grid-cols-[2fr_1fr]">
           <!-- Project Progress -->
           <div class="flex flex-col justify-between rounded-lg border border-border-light bg-surface p-5 dark:border-border-dark dark:bg-obsidian-surface">
             <div class="flex items-center justify-between gap-3">
@@ -506,97 +553,61 @@ async function submitTaskProposal() {
         <!-- Project Phase Goals & Initialization Workflow -->
         <ProjectPhaseRoadmap :challenge="challenge" :tasks="tasks" />
 
-        <div class="grid gap-8 lg:grid-cols-[1.3fr_0.9fr]">
-          <div class="space-y-6">
-            <div>
-              <h2 class="text-base font-semibold text-ink dark:text-chalk">
-                {{ t.challenge.background }}
-              </h2>
+        <div class="space-y-6">
+          <div>
+            <h2 class="text-base font-semibold text-ink dark:text-chalk">
+              {{ t.challenge.background }}
+            </h2>
+            <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
+              {{ loc(challenge.background) }}
+            </p>
+          </div>
+
+          <div>
+            <h2 class="text-base font-semibold text-ink dark:text-chalk">
+              {{ t.challenge.ultimateGoal }}
+            </h2>
+            <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
+              {{ loc(challenge.ultimateGoal) }}
+            </p>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
+              <h3 class="text-sm font-semibold text-ink dark:text-chalk">
+                {{ t.challenge.scoringMetric }}
+              </h3>
               <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(challenge.background) }}
+                {{ loc(challenge.scoringMetric) }}
               </p>
             </div>
-
-            <div>
-              <h2 class="text-base font-semibold text-ink dark:text-chalk">
-                {{ t.challenge.ultimateGoal }}
-              </h2>
+            <div class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
+              <h3 class="text-sm font-semibold text-ink dark:text-chalk">
+                {{ t.challenge.verificationMethod }}
+              </h3>
               <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(challenge.ultimateGoal) }}
+                {{ loc(challenge.verificationMethod) }}
               </p>
-            </div>
-
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
-                <h3 class="text-sm font-semibold text-ink dark:text-chalk">
-                  {{ t.challenge.scoringMetric }}
-                </h3>
-                <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-                  {{ loc(challenge.scoringMetric) }}
-                </p>
-              </div>
-              <div class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
-                <h3 class="text-sm font-semibold text-ink dark:text-chalk">
-                  {{ t.challenge.verificationMethod }}
-                </h3>
-                <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-                  {{ loc(challenge.verificationMethod) }}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <h2 class="text-base font-semibold text-ink dark:text-chalk">
-                {{ t.challenge.rules }}
-              </h2>
-              <ul class="mt-3 space-y-2 text-sm text-ink-muted dark:text-chalk-muted">
-                <li
-                  v-for="(rule, idx) in challenge.rules"
-                  :key="idx"
-                  class="flex items-start gap-2.5"
-                >
-                  <span class="mt-0.5 font-mono text-xs font-semibold text-accent dark:text-accent-dark">
-                    {{ String(idx + 1).padStart(2, '0') }}.
-                  </span>
-                  <span class="leading-relaxed">{{ loc(rule) }}</span>
-                </li>
-              </ul>
             </div>
           </div>
 
-          <!-- Agent Onboarding Panel -->
-          <aside ref="agentAccess" id="agent-access" tabindex="-1" class="scroll-mt-20 space-y-4">
-            <div class="rounded-md border border-border-light bg-surface p-5 dark:border-border-dark dark:bg-obsidian-surface">
-              <h2 class="text-sm font-semibold text-ink dark:text-chalk">
-                {{ t.challenge.agentAccess }}
-              </h2>
-              <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{
-                  challenge.status === 'Active'
-                    ? t.home.joinSubtitle
-                    : t.challenge.proposedNotice
-                }}
-              </p>
-              <div v-if="challenge.status === 'Active'" class="mt-4 space-y-3">
-                <AgentJoinPrompt
-                  :challenge-id="challenge.id"
-                  :slug="challenge.slug"
-                  :instructions-path="challenge.joinInstructionsPath"
-                />
-                <div class="flex flex-wrap items-center gap-3 pt-1 text-xs">
-                  <a
-                    :href="challenge.joinInstructionsPath"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="inline-flex items-center gap-1 font-mono text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
-                  >
-                    <FileText class="h-3.5 w-3.5" />
-                    <span>{{ t.home.viewJoinTxt }}</span>
-                  </a>
-                </div>
-              </div>
-            </div>
-          </aside>
+          <div>
+            <h2 class="text-base font-semibold text-ink dark:text-chalk">
+              {{ t.challenge.rules }}
+            </h2>
+            <ul class="mt-3 space-y-2 text-sm text-ink-muted dark:text-chalk-muted">
+              <li
+                v-for="(rule, idx) in challenge.rules"
+                :key="idx"
+                class="flex items-start gap-2.5"
+              >
+                <span class="mt-0.5 font-mono text-xs font-semibold text-accent dark:text-accent-dark">
+                  {{ String(idx + 1).padStart(2, '0') }}.
+                </span>
+                <span class="leading-relaxed">{{ loc(rule) }}</span>
+              </li>
+            </ul>
+          </div>
         </div>
 
         <!-- Record Progression Chart (when historical data exists) -->
@@ -657,48 +668,93 @@ async function submitTaskProposal() {
       <section v-else-if="activeTab === 'tasks'" class="mt-6 space-y-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex flex-wrap items-center gap-2">
-            <select
-              v-model="statusFilter"
-              class="rounded border border-border-light bg-surface px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
+            <div
+              class="inline-flex rounded border border-border-light bg-surface p-0.5 dark:border-border-dark dark:bg-obsidian-surface"
             >
-              <option value="ALL">{{ t.challenge.allStatuses }}</option>
-              <option
-                v-for="s in ['Available', 'Leased', 'Verifying', 'Submitted', 'Accepted', 'Blocked', 'Proposed', 'Pending', 'Rejected']"
-                :key="s"
-                :value="s"
+              <button
+                type="button"
+                class="rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer"
+                :class="
+                  taskViewMode === 'visual'
+                    ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
+                    : 'text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk'
+                "
+                @click="taskViewMode = 'visual'"
               >
-                {{ s }}
-              </option>
-            </select>
+                {{ t.scheduler.visualMode }}
+              </button>
+              <button
+                type="button"
+                class="rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer"
+                :class="
+                  taskViewMode === 'list'
+                    ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
+                    : 'text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk'
+                "
+                @click="taskViewMode = 'list'"
+              >
+                {{ t.scheduler.listMode }}
+              </button>
+            </div>
 
-            <select
-              v-model="typeFilter"
-              class="rounded border border-border-light bg-surface px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
-            >
-              <option value="ALL">{{ t.challenge.allTypes }}</option>
-              <option
-                v-for="tp in ['Research', 'Search', 'Implementation', 'Verification', 'Counterexample', 'Optimization', 'Documentation', 'Integration']"
-                :key="tp"
-                :value="tp"
+            <template v-if="taskViewMode === 'list'">
+              <select
+                v-model="statusFilter"
+                class="rounded border border-border-light bg-surface px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
               >
-                {{ tp }}
-              </option>
-            </select>
+                <option value="ALL">{{ t.challenge.allStatuses }}</option>
+                <option
+                  v-for="s in ['Available', 'Leased', 'Verifying', 'Submitted', 'Accepted', 'Blocked', 'Proposed', 'Pending', 'Rejected']"
+                  :key="s"
+                  :value="s"
+                >
+                  {{ s }}
+                </option>
+              </select>
+
+              <select
+                v-model="typeFilter"
+                class="rounded border border-border-light bg-surface px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
+              >
+                <option value="ALL">{{ t.challenge.allTypes }}</option>
+                <option
+                  v-for="tp in ['Research', 'Search', 'Implementation', 'Verification', 'Counterexample', 'Optimization', 'Documentation', 'Integration']"
+                  :key="tp"
+                  :value="tp"
+                >
+                  {{ tp }}
+                </option>
+              </select>
+            </template>
           </div>
 
-          <button
-            v-if="challenge.status === 'Active'"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
-            @click="proposeOpen = true"
-          >
-            <Plus class="h-3.5 w-3.5" />
-            <span>{{ t.challenge.proposeTask }}</span>
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <RouterLink
+              :to="`/tasks?challenge=${challenge.slug}`"
+              class="inline-flex items-center gap-1 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted hover:border-ink/40 hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted dark:hover:text-chalk"
+            >
+              <span>{{ t.scheduler.viewInScheduler }} →</span>
+            </RouterLink>
+            <button
+              v-if="challenge.status === 'Active'"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
+              @click="proposeOpen = true"
+            >
+              <Plus class="h-3.5 w-3.5" />
+              <span>{{ t.challenge.proposeTask }}</span>
+            </button>
+          </div>
         </div>
 
+        <TaskPoolVisualizer
+          v-if="taskViewMode === 'visual'"
+          :tasks="tasks"
+          :contributions="contributions"
+        />
+
         <div
-          v-if="filteredTasks.length === 0"
+          v-else-if="filteredTasks.length === 0"
           class="rounded-md border border-border-light bg-surface p-8 text-center text-sm text-ink-muted dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted"
         >
           {{ t.challenge.noTasksMatch }}

@@ -295,4 +295,79 @@ describe('Common Intelligence Frontend MVP', () => {
 
     wrapper.unmount();
   });
+
+  it('renders /tasks scheduler visualization with agent subtask decompositions and contributor completions in EN and ZH', async () => {
+    const router = createTestRouter('/tasks?challenge=grandmaster');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    // Default Scheduling Graph view renders SVG nodes & edges and provenance inspector
+    expect(wrapper.text()).toContain('Task Pool Scheduling Visualizer');
+    expect(wrapper.find('svg[aria-label*="Task pool decomposition"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('PLAN-GM-001');
+    expect(wrapper.text()).toContain('TASK-GM-001');
+
+    // Switch to Agent Decompositions tab: shows which subtasks each contributor's agent decomposed
+    const decompTab = wrapper.findAll('button[role="tab"]').find((b) => b.text().includes('Agent Decompositions'));
+    expect(decompTab).toBeDefined();
+    await decompTab!.trigger('click');
+    await flushPromises();
+
+    const decompText = wrapper.text();
+    expect(decompText).toContain('@elena-rostova-demo');
+    expect(decompText).toContain('grandmaster-planner-01');
+    expect(decompText).toContain('TASK-GM-001');
+    expect(decompText).toContain('TASK-GM-002');
+    expect(decompText).toContain('@kenji-takahashi-demo');
+    expect(decompText).toContain('sprt-auditor-jp');
+    expect(decompText).toContain('TASK-GM-005');
+
+    // Switch to Contributor Tasks tab: shows what tasks each contributor completed
+    const contribTab = wrapper.findAll('button[role="tab"]').find((b) => b.text().includes('Contributor Tasks'));
+    expect(contribTab).toBeDefined();
+    await contribTab!.trigger('click');
+    await flushPromises();
+
+    const contribText = wrapper.text();
+    expect(contribText).toContain('Tasks Completed by @lin-chen-demo');
+    expect(contribText).toContain('TASK-GM-001');
+    expect(contribText).toContain('Tasks Completed by @mateo-silva-demo');
+    expect(contribText).toContain('TASK-GM-008');
+
+    // Switch to Chinese locale and verify bilingual labels
+    const langBtn = wrapper.findAll('button').find((b) => b.text().includes('EN / 中'));
+    expect(langBtn).toBeDefined();
+    await langBtn!.trigger('click');
+    await flushPromises();
+
+    const zhText = wrapper.text();
+    expect(zhText).toContain('任务池调度可视化');
+    expect(zhText).toContain('贡献者 @lin-chen-demo 完成的任务');
+    expect(zhText).toContain('@elena-rostova-demo 的 Agent 分解的子任务');
+
+    wrapper.unmount();
+  });
+
+  it('places the Send Your Agent card prominently inside the ChallengeDetailPage header above tabs', async () => {
+    const router = createTestRouter('/challenges/grandmaster');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    const header = wrapper.get('main header');
+    const agentCard = header.find('#agent-access');
+    expect(agentCard.exists()).toBe(true);
+    expect(agentCard.text()).toContain('Send Your Agent');
+    expect(agentCard.text()).toContain('/challenges/grandmaster/join.txt');
+
+    // Remains visible above tabs even when switching to Tasks tab
+    const tasksTab = wrapper.findAll('nav[aria-label="Challenge sections"] button').find((b) => b.text().includes('Tasks'));
+    expect(tasksTab).toBeDefined();
+    await tasksTab!.trigger('click');
+    await flushPromises();
+    expect(wrapper.find('main header #agent-access').exists()).toBe(true);
+
+    wrapper.unmount();
+  });
 });
