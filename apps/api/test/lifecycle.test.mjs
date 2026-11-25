@@ -8,6 +8,8 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { app, sweep } from '../src/index';
 import { catalogStatements } from '../scripts/seed.mjs';
+import { validateProjectBrief } from '@common-intelligence/shared';
+import { AI_CIVILIZATION_BRIEF } from '../../web/src/data/aiCivilization.ts';
 
 const origin = 'http://localhost:8787';
 const sha = '8'.repeat(40),
@@ -285,9 +287,16 @@ afterAll(async () => {
 it('runs the planner, two independent agents, PR proof, honors, dead ends, and dependency unlock end to end', async () => {
   expect((await request('/')).status).toBe(200);
   const catalog = await ok(request('/api/challenges'));
-  expect(catalog.total).toBe(3);
-  expect(catalog.items.map((c) => c.slug).sort()).toEqual(['grandmaster', 'open-game', 'open-language']);
-  expect(catalog.items.filter((c) => c.status === 'Active')).toHaveLength(1);
+  expect(catalog.total).toBe(4);
+  expect(catalog.items.map((c) => c.slug).sort()).toEqual(['ai-civilization', 'grandmaster', 'open-game', 'open-language']);
+  expect(catalog.items.filter((c) => c.status === 'Active')).toHaveLength(2);
+  for (const brief of Object.values(AI_CIVILIZATION_BRIEF)) {
+    expect(validateProjectBrief(brief)).toHaveProperty('data');
+  }
+  expect(catalog.items.find((c) => c.id === 'ai-civilization')).toMatchObject({
+    name: 'AI 文明模拟', status: 'Active', stats: { openTasksCount: 1 },
+  });
+  expect(await (await request('/challenges/ai-civilization/join.txt')).text()).toContain('first planning task');
   expect(catalog.items.find((c) => c.id === 'grandmaster').record.currentBestValue).toBeUndefined();
   expect((await ok(request('/api/challenges/grandmaster/progress'))).tasksByStatus.Available).toBe(2);
   expect(await (await request('/challenges/grandmaster/join.txt')).text()).toContain('leaseToken');
@@ -702,7 +711,7 @@ it('keeps project proposals private until a maintainer publishes a claimable cha
 it('authorizes a full Agent session from a project prompt and consumes the code once', async () => {
   const operator = await login();
   const join = '/api/agent-join';
-  const body = { challengeId: 'grandmaster' };
+  const body = { challengeId: 'ai-civilization' };
   expect((await request(join, { body })).status).toBe(401);
   expect((await request(join, { body, headers: { cookie: operator.headers.cookie } })).status).toBe(403);
   expect((await request(join, { body: { challengeId: 'missing' }, headers: operator.headers })).status).toBe(404);
@@ -713,7 +722,7 @@ it('authorizes a full Agent session from a project prompt and consumes the code 
   const redemptions = await Promise.all([1, 2].map(() => request(join + '/redeem', { body: { code } })));
   expect(redemptions.map((response) => response.status).sort()).toEqual([201, 401]);
   const { plaintextToken, challengeId } = await ok(redemptions.find((response) => response.ok), 201);
-  expect(challengeId).toBe('grandmaster');
+  expect(challengeId).toBe('ai-civilization');
   const { items } = await ok(request('/api/agent-tokens', { headers: operator.headers }));
   expect(items).toHaveLength(1);
   expect(items[0]).toMatchObject({
@@ -727,7 +736,8 @@ it('authorizes a full Agent session from a project prompt and consumes the code 
   }), 201);
   expect(agent.ownerGithubId).toBe(String(operator.uid));
   expect((await request('/api/admin/project-proposals', { headers })).status).toBe(403);
-  expect((await claim({ id: agent.id, headers }, challengeId)).status).toBe(200);
+  const claimed = await ok(claim({ id: agent.id, headers }, challengeId));
+  expect(await ok(request('/api/tasks/' + claimed.taskId))).toMatchObject({ isPlanning: true });
   await ok(request('/api/agent-tokens/' + items[0].id, { headers: operator.headers, method: 'DELETE' }), 204);
   expect((await request('/api/knowledge', { headers })).status).toBe(401);
 

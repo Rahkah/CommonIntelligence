@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Pause, Play } from 'lucide-vue-next';
 import { useAppState } from '@/stores/appState';
 
 interface PeerNode {
@@ -48,7 +47,6 @@ const { state, t } = useAppState();
 const containerRef = ref<HTMLDivElement | null>(null);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const prefersReducedMotion = ref(false);
-const userPaused = ref(false);
 
 let width = 880;
 let height = 340;
@@ -74,7 +72,7 @@ const pointer = {
 };
 
 function isAnimationRunning(): boolean {
-  return !prefersReducedMotion.value && !userPaused.value;
+  return !prefersReducedMotion.value;
 }
 
 function getPalette() {
@@ -688,16 +686,6 @@ function onCanvasClick(event: PointerEvent) {
   }
 }
 
-function togglePause() {
-  userPaused.value = !userPaused.value;
-  if (isAnimationRunning()) {
-    startLoop();
-  } else {
-    stopLoop();
-    draw();
-  }
-}
-
 function handleVisibilityChange() {
   if (typeof document === 'undefined') return;
   if (document.hidden) {
@@ -715,7 +703,7 @@ function handleMotionChange(e: MediaQueryListEvent) {
       seedBalancedEdges(Math.floor(nodes.length * 1.1), 1);
     }
     draw();
-  } else if (!userPaused.value) {
+  } else {
     startLoop();
   }
 }
@@ -761,7 +749,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <figure class="space-y-3">
+  <figure>
     <div
       ref="containerRef"
       class="relative w-full overflow-hidden border-y border-border-light bg-paper dark:border-border-dark dark:bg-obsidian"
@@ -776,26 +764,5 @@ onBeforeUnmount(() => {
         @pointerdown="onCanvasClick"
       />
     </div>
-
-    <figcaption
-      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 font-mono text-[11px] leading-relaxed text-ink-faint dark:text-chalk-faint"
-    >
-      <span>{{ t.about.hero.visualCaption }}</span>
-
-      <div class="flex items-center gap-3">
-        <span class="hidden sm:inline">{{ t.about.hero.visualHint }}</span>
-        <button
-          v-if="!prefersReducedMotion"
-          type="button"
-          class="inline-flex items-center gap-1 rounded border border-border-light px-2 py-0.5 text-[10.5px] text-ink-muted transition hover:border-ink/40 hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:border-chalk/40 dark:hover:text-chalk cursor-pointer"
-          :aria-label="userPaused ? t.about.hero.resumeMotion : t.about.hero.pauseMotion"
-          @click="togglePause"
-        >
-          <Play v-if="userPaused" class="h-2.5 w-2.5" />
-          <Pause v-else class="h-2.5 w-2.5" />
-          <span>{{ userPaused ? t.about.hero.resumeMotion : t.about.hero.pauseMotion }}</span>
-        </button>
-      </div>
-    </figcaption>
   </figure>
 </template>

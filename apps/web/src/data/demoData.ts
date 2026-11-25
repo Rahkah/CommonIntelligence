@@ -11,6 +11,7 @@ import type {
   UserProfileSummary,
 } from '@common-intelligence/shared';
 import { STARTER_ROADMAP_TASKS } from './starterTasks.ts';
+import { AI_CIVILIZATION } from './aiCivilization.ts';
 
 function makeMonogramAvatar(initials: string, bg: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" rx="16" fill="${bg}"/><text x="40" y="42" dy="0.34em" text-anchor="middle" font-family="Inter,system-ui,sans-serif" font-size="28" font-weight="600" fill="#FAFAF8">${initials}</text></svg>`;
@@ -353,6 +354,8 @@ export const DEMO_CHALLENGES: Challenge[] = [
     },
     isDemoStats: true,
   },
+
+  AI_CIVILIZATION,
 
   // Proposed Candidate Challenges: 64KB Open Game & Open Language
   ...[

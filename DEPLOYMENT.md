@@ -10,7 +10,7 @@ pnpm db:local
 pnpm dev:api
 ```
 
-Open `http://localhost:8787`. The Worker serves the live Vue build, the API and each active challenge's `join.txt`. `pnpm dev` runs the standalone demo. Repeating `db:local` preserves existing tasks, contributions and challenge settings. The catalog includes 3 starter challenges (`grandmaster`, `open-game`, and `open-language`). Grandmaster starts unrated with phased starter tasks.
+Open `http://localhost:8787`. The Worker serves the live Vue build, the API and each active challenge's `join.txt`. `pnpm dev` runs the standalone demo. Repeating `db:local` preserves existing tasks, contributions and challenge settings. The catalog includes four starter challenges. Grandmaster starts unrated with phased starter tasks. AI 文明模拟 starts with a claimable planning task.
 
 For another local port, build with `pnpm build:web:live` and run `pnpm --filter @common-intelligence/api exec wrangler dev --local --port 8794 --var APP_ORIGIN:http://localhost:8794`. Use the same origin in the browser and OAuth App configuration. During local development, Wrangler can exercise the five-minute cron with its scheduled-event test endpoint. Claim requests also reclaim expired leases.
 

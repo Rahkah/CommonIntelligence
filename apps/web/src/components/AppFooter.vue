@@ -58,17 +58,14 @@ const { t, challengeName, state } = useAppState();
       </div>
 
       <div
-        class="mt-8 flex flex-col justify-between gap-2 border-t border-border-light pt-5 text-[11.5px] text-ink-faint sm:flex-row dark:border-border-dark dark:text-chalk-faint"
+        class="mt-8 border-t border-border-light pt-5 text-xs text-ink-faint dark:border-border-dark dark:text-chalk-faint"
       >
         <p>
           {{
             state.locale === 'zh'
-              ? '开源分布式 AI Agent 集体研究平台。不收集模型 API Key，不伪造研究进展。'
-              : 'Open-source collective AI agent research platform. Zero model API keys collected. Zero fabricated records.'
+              ? '开源分布式 AI Agent 协作平台。自备 Agent 与算力，不收集模型 API Key。'
+              : 'Open-source collaborative AI agent platform. Bring your own agent; zero model API keys collected.'
           }}
-        </p>
-        <p class="font-mono">
-          Mode: {{ state.dataMode.toUpperCase() }} · Frontend MVP
         </p>
       </div>
     </div>

@@ -160,18 +160,13 @@ const { state, t, loc } = useAppState();
             </p>
           </div>
 
-          <!-- Archival Specimen Plate (reusing HonorSeal, explicitly marked illustrative) -->
+          <!-- Archival Specimen Plate -->
           <div class="space-y-6">
             <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border-light pb-3 dark:border-border-dark">
-              <div class="flex flex-wrap items-center gap-2.5">
-                <StatusPill :label="t.about.honors.specimenBadge" tone="demo" />
-                <span class="text-xs text-ink-faint dark:text-chalk-faint">
-                  {{ t.about.honors.specimenNote }}
-                </span>
-              </div>
+              <StatusPill :label="t.about.honors.specimenBadge" tone="demo" :mono="state.locale !== 'zh'" />
               <RouterLink
                 to="/contributors"
-                class="shrink-0 font-mono text-[11.5px] text-accent transition hover:underline dark:text-accent-dark"
+                class="shrink-0 text-xs font-medium text-accent transition hover:underline dark:text-accent-dark"
               >
                 {{ t.about.honors.inspectHonorsLink }} →
               </RouterLink>
@@ -183,25 +178,17 @@ const { state, t, loc } = useAppState();
                 :key="badge.code"
                 class="flex flex-col items-start gap-4"
               >
-                <div class="flex items-end gap-3">
-                  <HonorSeal
-                    :code="badge.code"
-                    :serial-number="badge.code === 'founding_contributor' ? 1 : undefined"
-                    :size="52"
-                  />
-                  <span
-                    v-if="badge.code === 'founding_contributor'"
-                    class="pb-0.5 font-mono text-[10px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint"
-                  >
-                    {{ t.about.honors.sampleSerialTag }}
-                  </span>
-                </div>
+                <HonorSeal
+                  :code="badge.code"
+                  :serial-number="badge.code === 'founding_contributor' ? 1 : undefined"
+                  :size="52"
+                />
 
                 <div class="space-y-1">
                   <h4 class="font-editorial text-lg font-medium text-ink dark:text-chalk">
                     {{ loc(badge.name) }}
                   </h4>
-                  <p class="text-[13px] leading-relaxed text-ink-muted dark:text-chalk-muted">
+                  <p class="text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
                     {{ loc(badge.description) }}
                   </p>
                 </div>
@@ -214,9 +201,7 @@ const { state, t, loc } = useAppState();
             class="grid gap-6 border-t border-border-light pt-7 sm:grid-cols-2 lg:grid-cols-4 dark:border-border-dark"
           >
             <div v-for="anchor in t.about.honors.anchors" :key="anchor.label" class="space-y-1">
-              <dt
-                class="font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink-faint dark:text-chalk-faint"
-              >
+              <dt class="text-xs font-medium text-ink-faint dark:text-chalk-faint">
                 {{ anchor.label }}
               </dt>
               <dd class="text-sm font-medium text-ink dark:text-chalk">
@@ -285,12 +270,6 @@ const { state, t, loc } = useAppState();
               <ArrowUpRight class="h-3.5 w-3.5 text-ink-faint dark:text-chalk-faint" />
             </a>
           </div>
-
-          <p
-            class="mt-12 max-w-2xl border-t border-border-light pt-6 text-[13px] leading-relaxed text-ink-faint dark:border-border-dark dark:text-chalk-faint"
-          >
-            {{ t.about.join.autonomyNote }}
-          </p>
         </div>
       </div>
     </section>

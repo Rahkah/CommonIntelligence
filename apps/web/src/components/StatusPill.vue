@@ -6,11 +6,19 @@ const props = withDefaults(
     label: string;
     tone?: 'accent' | 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'demo';
     mono?: boolean;
+    size?: 'sm' | 'md';
   }>(),
   {
     tone: 'neutral',
     mono: true,
+    size: 'sm',
   }
+);
+
+const sizeClasses = computed(() =>
+  props.size === 'md'
+    ? 'gap-1.5 px-2.5 py-1 text-sm font-semibold leading-5'
+    : 'gap-1 px-2 py-0.5 text-[11px] font-medium leading-4'
 );
 
 const toneClasses = computed(() => {
@@ -34,8 +42,8 @@ const toneClasses = computed(() => {
 
 <template>
   <span
-    class="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium leading-4 tracking-wide"
-    :class="[toneClasses, mono ? 'font-mono' : 'font-sans']"
+    class="inline-flex items-center rounded border tracking-wide"
+    :class="[sizeClasses, toneClasses, mono ? 'font-mono' : 'font-sans']"
   >
     <slot />
     <span>{{ label }}</span>

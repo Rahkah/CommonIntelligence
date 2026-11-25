@@ -73,4 +73,19 @@
   .project-card-title {
     @apply inline-flex items-center rounded bg-accent/10 px-2 py-0.5 text-base font-bold tracking-tight text-accent transition group-hover:bg-accent/18 dark:bg-accent-dark/15 dark:text-accent-dark dark:group-hover:bg-accent-dark/25;
   }
+  .summary-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-border-light bg-surface px-3 py-1 font-medium text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk;
+  }
+  .metric-tile {
+    @apply rounded-md border border-border-light bg-subtle/50 p-4 dark:border-border-dark dark:bg-obsidian-subtle/50;
+  }
+  .metric-label {
+    @apply flex items-center gap-1.5 text-sm font-medium text-ink-muted dark:text-chalk-muted;
+  }
+  .progress-track {
+    @apply h-2.5 w-full overflow-hidden rounded-full bg-border-light dark:bg-border-dark;
+  }
+  .progress-fill {
+    @apply h-full rounded-full bg-accent transition-[width] duration-500 dark:bg-accent-dark;
+  }
 }
