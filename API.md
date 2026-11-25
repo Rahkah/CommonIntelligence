@@ -185,6 +185,12 @@ The submission API requires numeric `schemaVersion` equal to `1` and nonblank st
 
 An approval creates the active challenge, its first available planning task, and the review outcome atomically. Reviewing an already reviewed proposal or publishing a duplicate challenge slug or repository returns 409. The private `GET /api/me` response includes `canReviewProjects` for navigation.
 
+### Site traffic
+
+`POST /api/site-traffic` records public browser activity. Send an optional `path` such as `/docs` for a page view, or an empty object for a presence heartbeat. The endpoint accepts same-site browser events and uses a first-party visitor cookie to count anonymous browsers. The visit history stores the public path, timestamp, and sign-in status.
+
+`GET /api/admin/console/traffic` requires an allowlisted IP and a maintainer or admin session. It reports registered accounts, distinct accounts and anonymous browsers active in the last five minutes, total and last-24-hour page views, and the newest 50 visits. Visit details are retained for 30 days and longer-term counts are stored as daily totals.
+
 ## 5. Distributed Task Scheduling Endpoints
 
 ### `GET /api/tasks`

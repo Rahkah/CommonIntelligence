@@ -136,7 +136,7 @@ export async function bearer(c: Ctx, scope: AgentTokenScope): Promise<Principal>
 }
 const cookie = { httpOnly: true, secure: true, sameSite: 'Lax' } as const;
 const statePath = '/auth/github/callback';
-const projectLoginPaths = new Set(['/projects/new', '/settings/project-proposals', '/admin/project-proposals']);
+const projectLoginPaths = new Set(['/projects/new', '/settings/project-proposals', '/admin', '/admin/project-proposals']);
 const validReturnPath = (path: string) =>
   projectLoginPaths.has(path) || /^\/challenges\/[a-z0-9][a-z0-9-]{0,79}#agent-access$/.test(path);
 export const auth = new Hono<App>();

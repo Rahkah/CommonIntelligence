@@ -1,13 +1,15 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
-import { type App, type Bindings, Fault, fail, iso, now, rate, sql } from './core';
+import { type App, type Bindings, after, Fault, fail, iso, now, rate, sql } from './core';
 import { adminConsole } from './admin';
 import { auth, bearer } from './auth';
+import { demoActivity } from './demo-activity';
 import { catalog } from './public';
 import { projectProposals } from './project-proposals';
 import { work, expire, replenish } from './tasks';
 import { hooks, reconcile } from './verification';
+import { traffic } from './traffic';
 
 export const app = new Hono<App>();
 app.use('*', async (c, next) => {
@@ -17,6 +19,7 @@ app.use('*', async (c, next) => {
     c.req.path.startsWith('/auth/') ||
     c.req.path.startsWith('/api/admin/') ||
     c.req.path === '/api/project-proposals' ||
+    c.req.path === '/api/demo-activity' ||
     ['/api/me', '/api/agent-tokens'].includes(c.req.path)
   )
     c.header('Cache-Control', 'no-store');
@@ -48,7 +51,9 @@ app.route('/', adminConsole);
 app.route('/', auth);
 app.route('/', work);
 app.route('/', projectProposals);
+app.route('/', traffic);
 app.route('/', catalog);
+app.route('/', demoActivity);
 app.route('/', hooks);
 app.get('/health', async (c) => {
   await c.env.DB.prepare('SELECT 1').first();
@@ -102,6 +107,8 @@ export async function sweep(db: D1Database) {
     sql(db, `DELETE FROM agent_join_codes WHERE expires_at<=${now}`),
     sql(db, `DELETE FROM rate_limit_buckets WHERE expires_at<=${now}`),
     sql(db, `DELETE FROM sessions WHERE expires_at<=${now} OR revoked_at IS NOT NULL`),
+    sql(db, `DELETE FROM site_presence WHERE last_seen_at<=${after('-1 day')}`),
+    sql(db, `DELETE FROM site_page_views WHERE visited_at<=${after('-30 days')}`),
   ]);
   // Recover an interrupted webhook, or a contribution whose parents were accepted later.
   const rows = await sql(

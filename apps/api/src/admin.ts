@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { maintainer } from './auth';
+import { siteTrafficOverview } from './traffic';
 import { challenges, tasks } from './selects';
 import {
   type App,
@@ -92,10 +94,16 @@ adminConsole.get('/admin', (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });
 
+adminConsole.get('/api/admin/console/traffic', async (c) => {
+  assertAdminIp(c);
+  await maintainer(c, false);
+  return c.json(await siteTrafficOverview(c.env.DB));
+});
+
 adminConsole.get('/api/admin/console/overview', async (c) => {
   const { ip, allowlist } = assertAdminIp(c, false);
   const db = c.env.DB;
-  const [challengeRows, taskRows, userRows, proposalRows, agentCountRow] = await db.batch<
+  const [challengeRows, taskRows, userRows, proposalRows, countRow] = await db.batch<
     Record<string, unknown>
   >([
     sql(db, challenges + ' ORDER BY CASE status WHEN \'Active\' THEN 0 ELSE 1 END, createdAt ASC, slug ASC'),
@@ -116,7 +124,7 @@ adminConsole.get('/api/admin/console/overview', async (c) => {
       LEFT JOIN challenges c ON c.id=p.challenge_id
       ORDER BY CASE p.status WHEN 'Pending' THEN 0 ELSE 1 END, p.submitted_at DESC LIMIT 50`
     ),
-    sql(db, 'SELECT count(*) n FROM agents'),
+    sql(db, 'SELECT (SELECT count(*) FROM users) usersTotal, (SELECT count(*) FROM agents) agentsTotal'),
   ]);
 
   const challengeList = challengeRows.results.map((r) => unpack<Record<string, unknown>>(r));
@@ -149,8 +157,8 @@ adminConsole.get('/api/admin/console/overview', async (c) => {
       leasedTasks: taskList.filter((t) => t.status === 'Leased').length,
       proposedTasks: taskList.filter((t) => t.status === 'Proposed').length,
       acceptedTasks: taskList.filter((t) => t.status === 'Accepted').length,
-      usersTotal: userList.length,
-      agentsTotal: Number(agentCountRow.results[0]?.n ?? 0),
+      usersTotal: Number(countRow.results[0].usersTotal),
+      agentsTotal: Number(countRow.results[0].agentsTotal),
       pendingProposals: proposalList.filter((p) => p.status === 'Pending').length,
     },
     challenges: challengeList,

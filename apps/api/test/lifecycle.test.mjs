@@ -819,3 +819,53 @@ it('seeds phased starter task pools and restricts /admin console to allowlisted 
     env.ADMIN_IP_ALLOWLIST = prevAllowlist;
   }
 }, 20000);
+
+it('tracks public page views and recent online activity for the protected admin traffic report', async () => {
+  const record = '/api/site-traffic';
+  const report = '/api/admin/console/traffic';
+  const visitorHeaders = { Origin: origin, 'CF-Connecting-IP': '203.0.113.9' };
+  const adminHeaders = { ...admin.headers, 'CF-Connecting-IP': '141.11.146.88' };
+  const user = await login();
+  const previousAllowlist = env.ADMIN_IP_ALLOWLIST;
+  env.ADMIN_IP_ALLOWLIST = '141.11.146.88';
+  try {
+    expect((await request(report, { headers: { 'CF-Connecting-IP': '141.11.146.88' } })).status).toBe(401);
+    expect((await request(report, { headers: { ...user.headers, 'CF-Connecting-IP': '141.11.146.88' } })).status).toBe(403);
+    expect((await request(report, { headers: { ...admin.headers, 'CF-Connecting-IP': '203.0.113.9' } })).status).toBe(403);
+    expect((await request(record, { headers: { Origin: 'https://elsewhere.example' }, body: { path: '/' } })).status).toBe(403);
+    for (const path of ['/admin', '/docs?secret=not-for-logs']) {
+      expect((await request(record, { headers: visitorHeaders, body: { path } })).status).toBe(400);
+    }
+
+    const firstView = await request(record, { headers: visitorHeaders, body: { path: '/' } });
+    expect(firstView.status).toBe(204);
+    const cookie = firstView.headers.get('set-cookie');
+    expect(cookie).toContain('HttpOnly');
+    await ok(request(record, { headers: { ...visitorHeaders, cookie: cookie.split(';')[0] }, body: {} }), 204);
+    await ok(request(record, { headers: user.headers, body: { path: '/docs' } }), 204);
+    await ok(request(record, { headers: user.headers, body: {} }), 204);
+
+    await query(
+      'INSERT INTO site_page_views(id,path,signed_in,visited_at) VALUES(?,?,?,?)',
+      'expired-page', '/', 0, '2000-01-01T00:00:00.000Z'
+    ).run();
+    await query(
+      'INSERT INTO site_presence(visitor_id,last_seen_at) VALUES(?,?)',
+      'expired-visitor', '2000-01-01T00:00:00.000Z'
+    ).run();
+    await sweep(db);
+    const res = await request(report, { headers: adminHeaders });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    const stats = await ok(res);
+    expect(stats.registeredUsers).toBe(await db.prepare('SELECT count(*) n FROM users').first('n'));
+    expect(stats.online).toEqual({ total: 2, registered: 1, anonymous: 1, minutes: 5 });
+    expect(stats.pageViews).toEqual({ total: 3, last24Hours: 2 });
+    expect(stats.recentVisits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '/', signedIn: false }),
+      expect.objectContaining({ path: '/docs', signedIn: true }),
+    ]));
+    expect(stats.recentVisits).toHaveLength(2);
+  } finally {
+    env.ADMIN_IP_ALLOWLIST = previousAllowlist;
+  }
+}, 20000);

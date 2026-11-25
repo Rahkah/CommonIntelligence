@@ -40,6 +40,7 @@ describe('Common Intelligence Frontend MVP', () => {
     vi.spyOn(apiClient, 'getMe').mockResolvedValue({
       mode: 'live', authenticated: true, user: DEMO_USERS[0]!, canReviewProjects: true,
     });
+    const recordActivity = vi.spyOn(apiClient, 'recordSiteActivity').mockResolvedValue();
     const joinCode = 'ci_join_' + 'a'.repeat(64);
     const join = vi.spyOn(apiClient, 'createAgentJoinCode').mockResolvedValue({
       code: joinCode, expiresAt: '2026-11-25T00:05:00.000Z',
@@ -60,6 +61,7 @@ describe('Common Intelligence Frontend MVP', () => {
       const wrapper = mount(App, { global: { plugins: [router] } });
       try {
         await flushPromises();
+        expect(recordActivity).toHaveBeenCalledWith('/');
         expect(wrapper.get('a[href="/projects/new"]').text()).toBe('New project');
         expect(wrapper.get('a[href="/admin/project-proposals"]').text()).toBe('Review projects');
         const copyJoin = wrapper.findAll('button').find((button) => button.text() === 'Copy prompt and authorize agent');
@@ -117,6 +119,7 @@ describe('Common Intelligence Frontend MVP', () => {
         await router.push('/settings/project-proposals');
         await flushPromises();
         expect(wrapper.get('a[href="/challenges/open-scheduling-study"]').text()).toBe('View published project');
+        expect(recordActivity.mock.calls).toEqual([['/'], ['/projects/new']]);
       } finally {
         wrapper.unmount();
       }

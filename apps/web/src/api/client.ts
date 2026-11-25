@@ -19,6 +19,7 @@ import type {
   ProjectShowcase,
   ResearchArtifact,
   ShowcaseRelease,
+  SiteTrafficOverview,
   Task,
   UserProfileSummary,
 } from '@common-intelligence/shared';
@@ -91,6 +92,17 @@ export const apiClient = {
   getGitHubLoginUrl(returnTo?: string): string {
     const query = returnTo ? '?returnTo=' + encodeURIComponent(returnTo) : '';
     return `${API_BASE_URL}/auth/github${query}`;
+  },
+
+  recordSiteActivity(path?: string): Promise<void> {
+    return apiFetch('/api/site-traffic', {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  },
+
+  getSiteTraffic(): Promise<SiteTrafficOverview> {
+    return apiFetch('/api/admin/console/traffic');
   },
 
   async getMe(): Promise<AuthSessionResponse> {

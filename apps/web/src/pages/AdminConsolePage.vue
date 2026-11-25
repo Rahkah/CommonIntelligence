@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import type { Challenge, ChallengeStatus, Task, TaskPriority, TaskStatus, TaskType } from '@common-intelligence/shared';
 import { Lock, Plus, RefreshCw, ShieldCheck, ExternalLink } from 'lucide-vue-next';
 import StatusPill from '@/components/StatusPill.vue';
+import SiteTrafficPanel from '@/components/SiteTrafficPanel.vue';
 import { API_BASE_URL } from '@/api/client';
 import { useAppState } from '@/stores/appState';
 
@@ -50,13 +51,13 @@ interface AdminOverview {
   proposals: AdminProposalRow[];
 }
 
-const { state, loc, challengeName, challengeStatus, notify } = useAppState();
+const { state, t, loc, challengeName, challengeStatus, notify } = useAppState();
 
 const loading = ref(true);
 const forbidden = ref(false);
 const errorMessage = ref('');
 const overview = ref<AdminOverview | null>(null);
-const activeTab = ref<'challenges' | 'tasks' | 'users' | 'proposals'>('challenges');
+const activeTab = ref<'challenges' | 'tasks' | 'users' | 'proposals' | 'traffic'>('challenges');
 const busyKey = ref<string | null>(null);
 
 // Task filtering & quick creation
@@ -382,6 +383,7 @@ onMounted(loadOverview);
             { id: 'tasks', label: state.locale === 'zh' ? '任务池管理' : 'Tasks', count: overview.tasks.length },
             { id: 'users', label: state.locale === 'zh' ? '用户与权限' : 'Users & Roles', count: overview.users.length },
             { id: 'proposals', label: state.locale === 'zh' ? '项目提案' : 'Project Proposals', count: overview.proposals.length },
+            { id: 'traffic', label: t.traffic.tab, count: undefined },
           ] as const"
           :key="tab.id"
           type="button"
@@ -394,14 +396,15 @@ onMounted(loadOverview);
           @click="activeTab = tab.id"
         >
           <span>{{ tab.label }}</span>
-          <span class="ml-1.5 rounded bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted">
+          <span v-if="tab.count !== undefined" class="ml-1.5 rounded bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted">
             {{ tab.count }}
           </span>
         </button>
       </nav>
 
+      <SiteTrafficPanel v-if="activeTab === 'traffic'" />
       <!-- Tab 1: Challenges -->
-      <section v-if="activeTab === 'challenges'" class="mt-6 overflow-x-auto rounded-lg border border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface">
+      <section v-else-if="activeTab === 'challenges'" class="mt-6 overflow-x-auto rounded-lg border border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface">
         <table class="w-full text-left text-xs">
           <thead class="border-b border-border-light bg-subtle/60 text-ink-muted dark:border-border-dark dark:bg-obsidian-subtle/60 dark:text-chalk-muted">
             <tr>
