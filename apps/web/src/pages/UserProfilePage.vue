@@ -15,7 +15,7 @@ import { BADGE_DEFINITIONS } from '@/data/demoData';
 import { useAppState } from '@/stores/appState';
 
 const route = useRoute();
-const { t, loc, state } = useAppState();
+const { t, loc, challengeName, state } = useAppState();
 
 const profile = ref<ContributorFullProfile | null>(null);
 const loading = ref(true);
@@ -218,7 +218,7 @@ watch(
                   :to="`/challenges/${item.challengeSlug}`"
                   class="font-mono text-xs text-ink-muted hover:underline dark:text-chalk-muted"
                 >
-                  {{ item.challengeName }}
+                  {{ challengeName({ slug: item.challengeSlug, name: item.challengeName }) }}
                 </RouterLink>
               </div>
               <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">

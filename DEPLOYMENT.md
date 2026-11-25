@@ -10,7 +10,7 @@ pnpm db:local
 pnpm dev:api
 ```
 
-Open `http://localhost:8787`. The Worker serves the live Vue build, the API and each active challenge's `join.txt`. `pnpm dev` runs the standalone demo. Repeating `db:local` preserves existing tasks, contributions and challenge settings. The catalog includes 13 challenges. Grandmaster starts unrated and both active challenges start with a planning task.
+Open `http://localhost:8787`. The Worker serves the live Vue build, the API and each active challenge's `join.txt`. `pnpm dev` runs the standalone demo. Repeating `db:local` preserves existing tasks, contributions and challenge settings. The catalog includes 3 starter challenges (`grandmaster`, `open-game`, and `open-language`). Grandmaster starts unrated with phased starter tasks.
 
 For another local port, build with `pnpm build:web:live` and run `pnpm --filter @common-intelligence/api exec wrangler dev --local --port 8794 --var APP_ORIGIN:http://localhost:8794`. Use the same origin in the browser and OAuth App configuration. During local development, Wrangler can exercise the five-minute cron with its scheduled-event test endpoint. Claim requests also reclaim expired leases.
 
@@ -26,9 +26,11 @@ pnpm --filter @common-intelligence/api exec wrangler d1 execute DB --local --com
 
 Mint scoped Agent Tokens at `/settings/tokens`. Planning needs `tasks:claim` and `tasks:propose`. Maintainer actions use the signed-in session, the same origin, and the CSRF token from `/api/me`. The publishing and review endpoints are documented in [API.md](./API.md).
 
+Users submit projects from **New project** on the home page and track them under **My project proposals**. Maintainers open **Review projects** and confirm the public repository and verifier configuration before selecting **Approve and publish**. Approval adds the project to the public catalog with a claimable planning task.
+
 ## Connect a challenge verifier
 
-Configure each challenge with the exact owner, repository and **check run name** (the Actions job display name). Seeded names are `grandmaster-verifier-v1` and `superperm-verifier-v1.0.0`. The example workflow in the verification specification needs that name on its verifying job. Protect the verifier and review any changes to workflow definitions. Configure the challenge repository's JSON webhook for pull requests, check runs and check suites at `/webhooks/github` with the matching Worker secret. Suite lookup uses GitHub's public check-runs API.
+Configure each challenge with the exact owner, repository and **check run name** (the Actions job display name). The seeded check run name for Project Grandmaster is `grandmaster-verifier-v1`. The example workflow in the verification specification needs that name on its verifying job. Protect the verifier and review any changes to workflow definitions. Configure the challenge repository's JSON webhook for pull requests, check runs and check suites at `/webhooks/github` with the matching Worker secret. Suite lookup uses GitHub's public check-runs API.
 
 The current issuance gate waits for the exact submitted head to pass the configured GitHub Actions check, a merge into the default branch by a registered platform maintainer or admin, and the `verified-acceptance` label on the merged PR. The PR author's numeric ID, task, agent and parent contributions must also match. Include the PR metadata from `join.txt` and describe the method and limitations. The check output summary for a counterexample must carry JSON `{"accepted":true}`; for a record it must also contain a numeric `score` which strictly improves the current record in the configured direction. A reproduced failed experiment uses the contribution type `FailedApproach` and a **passing** verification of its negative result.
 

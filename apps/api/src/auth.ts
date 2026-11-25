@@ -32,9 +32,58 @@ import {
 
 type Session = { id: string; github_id: string; csrf_token: string; role: string };
 export type Principal = { owner: string; token: string | null; role: string };
+const LOCAL_DEV_SESSION_ID = 'local-dev-session';
+const LOCAL_DEV_USER = {
+  githubId: '90000001',
+  username: 'local-dev',
+  displayName: 'Local Developer',
+  avatarUrl: 'https://avatars.githubusercontent.com/u/0?v=4',
+  profileUrl: 'https://github.com/local-dev',
+  role: 'maintainer',
+} as const;
+function isLocalOrigin(raw: string | undefined): boolean {
+  if (!raw) return false;
+  try {
+    const { protocol, hostname } = new URL(raw);
+    return protocol === 'http:' && (hostname === 'localhost' || hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+function isLocalDevAuthBypass(c: Ctx): boolean {
+  return (
+    c.env.LOCAL_DEV_AUTH_BYPASS === 'true' &&
+    isLocalOrigin(c.env.APP_ORIGIN) &&
+    isLocalOrigin(c.req.url)
+  );
+}
+async function ensureLocalDevSession(c: Ctx): Promise<Session> {
+  await sql(
+    c.env.DB,
+    `INSERT INTO users(github_id,username,display_name,avatar_url,profile_url,role) VALUES(?,?,?,?,?,?)
+    ON CONFLICT(github_id) DO NOTHING`,
+    LOCAL_DEV_USER.githubId,
+    LOCAL_DEV_USER.username,
+    LOCAL_DEV_USER.displayName,
+    LOCAL_DEV_USER.avatarUrl,
+    LOCAL_DEV_USER.profileUrl,
+    LOCAL_DEV_USER.role
+  ).run();
+  const row = await sql(c.env.DB, 'SELECT role FROM users WHERE github_id=?', LOCAL_DEV_USER.githubId).first<{
+    role: string;
+  }>();
+  return {
+    id: LOCAL_DEV_SESSION_ID,
+    github_id: LOCAL_DEV_USER.githubId,
+    csrf_token: 'local-dev-csrf',
+    role: row?.role ?? LOCAL_DEV_USER.role,
+  };
+}
 export async function session(c: Ctx) {
   const value = getCookie(c, 'ci_session');
-  if (!value) return null;
+  if (!value) {
+    return isLocalDevAuthBypass(c) ? ensureLocalDevSession(c) : null;
+  }
   return sql(
     c.env.DB,
     `SELECT s.id,s.github_id,s.csrf_token,u.role FROM sessions s JOIN users u ON u.github_id=s.github_id
@@ -55,14 +104,21 @@ export async function browser(c: Ctx, mutation = true): Promise<Principal> {
         fail(403, 'FORBIDDEN');
       }
     }
-    if (origin !== c.env.APP_ORIGIN || !(await equal(s.csrf_token, c.req.header('X-CSRF-Token') ?? '')))
+    if (s.id === LOCAL_DEV_SESSION_ID && isLocalDevAuthBypass(c)) {
+      if (origin && !isLocalOrigin(origin)) fail(403, 'FORBIDDEN');
+    } else if (
+      origin !== c.env.APP_ORIGIN ||
+      !(await equal(s.csrf_token, c.req.header('X-CSRF-Token') ?? ''))
+    ) {
       fail(403, 'FORBIDDEN');
+    }
   }
   return { owner: s.github_id, token: null, role: s.role };
 }
-export async function maintainer(c: Ctx) {
-  const p = await browser(c);
-  if (p.role !== 'maintainer' && p.role !== 'admin') fail(403, 'FORBIDDEN');
+const isMaintainer = (role?: string) => role === 'maintainer' || role === 'admin';
+export async function maintainer(c: Ctx, mutation = true) {
+  const p = await browser(c, mutation);
+  if (!isMaintainer(p.role)) fail(403, 'FORBIDDEN');
   return p;
 }
 export async function bearer(c: Ctx, scope: AgentTokenScope): Promise<Principal> {
@@ -80,8 +136,15 @@ export async function bearer(c: Ctx, scope: AgentTokenScope): Promise<Principal>
 }
 const cookie = { httpOnly: true, secure: true, sameSite: 'Lax' } as const;
 const statePath = '/auth/github/callback';
+const projectLoginPaths = new Set(['/projects/new', '/settings/project-proposals', '/admin/project-proposals']);
+const validReturnPath = (path: string) =>
+  projectLoginPaths.has(path) || /^\/challenges\/[a-z0-9][a-z0-9-]{0,79}#agent-access$/.test(path);
 export const auth = new Hono<App>();
 auth.get('/auth/github', (c) => {
+  const returnTo = c.req.query('returnTo') ?? '';
+  if (isLocalDevAuthBypass(c)) {
+    return c.redirect(c.env.APP_ORIGIN + (validReturnPath(returnTo) ? returnTo : '/'));
+  }
   const state = random();
   const url = new URL('https://github.com/login/oauth/authorize');
   url.search = new URLSearchParams({
@@ -91,11 +154,18 @@ auth.get('/auth/github', (c) => {
     redirect_uri: c.env.APP_ORIGIN + statePath,
   }).toString();
   setCookie(c, 'ci_oauth_state', state, { ...cookie, path: statePath, maxAge: 600 });
+  if (validReturnPath(returnTo)) {
+    setCookie(c, 'ci_oauth_return', returnTo, { ...cookie, path: statePath, maxAge: 600 });
+  } else {
+    deleteCookie(c, 'ci_oauth_return', { ...cookie, path: statePath });
+  }
   return c.redirect(url.toString());
 });
 auth.get(statePath, async (c) => {
   const expected = getCookie(c, 'ci_oauth_state');
+  const returnTo = getCookie(c, 'ci_oauth_return') ?? '';
   deleteCookie(c, 'ci_oauth_state', { ...cookie, path: statePath });
+  deleteCookie(c, 'ci_oauth_return', { ...cookie, path: statePath });
   const code = c.req.query('code');
   if (!expected || !code || !(await equal(expected, c.req.query('state') ?? '')))
     fail(400, 'VALIDATION_ERROR', 'Invalid OAuth state or code.');
@@ -157,16 +227,19 @@ auth.get(statePath, async (c) => {
     ),
   ]);
   setCookie(c, 'ci_session', secret, { ...cookie, path: '/', maxAge: 604800 });
-  return c.redirect(c.env.APP_ORIGIN + '/');
+  return c.redirect(c.env.APP_ORIGIN + (validReturnPath(returnTo) ? returnTo : '/'));
 });
 auth.post('/auth/logout', async (c) => {
   await browser(c);
-  await sql(
-    c.env.DB,
-    `UPDATE sessions SET revoked_at=${now} WHERE session_token_hash=?`,
-    await digest(getCookie(c, 'ci_session') + required(c.env.SESSION_SECRET))
-  ).run();
-  deleteCookie(c, 'ci_session', { ...cookie, path: '/' });
+  const raw = getCookie(c, 'ci_session');
+  if (raw) {
+    await sql(
+      c.env.DB,
+      `UPDATE sessions SET revoked_at=${now} WHERE session_token_hash=?`,
+      await digest(raw + required(c.env.SESSION_SECRET))
+    ).run();
+    deleteCookie(c, 'ci_session', { ...cookie, path: '/' });
+  }
   return c.body(null, 204);
 });
 auth.get('/api/me', async (c) => {
@@ -174,7 +247,13 @@ auth.get('/api/me', async (c) => {
   const user = s
     ? await one<UserProfileSummary>(c.env.DB, users + ' WHERE u.github_id=?', s.github_id)
     : null;
-  return c.json({ authenticated: !!user, mode: 'live', user, csrfToken: s?.csrf_token });
+  return c.json({
+    authenticated: !!user,
+    mode: 'live',
+    user,
+    csrfToken: s?.csrf_token,
+    canReviewProjects: isMaintainer(s?.role),
+  });
 });
 auth.get('/api/agent-tokens', async (c) => {
   const p = await browser(c, false);
@@ -229,6 +308,52 @@ auth.delete('/api/agent-tokens/:id', async (c) => {
   ).first();
   if (!r) fail(404, 'NOT_FOUND');
   return c.body(null, 204);
+});
+auth.post('/api/agent-join', async (c) => {
+  const principal = await browser(c);
+  const { challengeId } = await json(c, z.object({ challengeId: field(150) }).strict());
+  await rate(c, 'agent-join:' + principal.owner, 3600, 20);
+  const code = 'ci_join_' + random();
+  const expiresAt = iso(5 * 60 * 1000);
+  const saved = await sql(
+    c.env.DB,
+    `INSERT INTO agent_join_codes(code_hash,owner_github_id,challenge_id,expires_at)
+     SELECT ?,?,id,? FROM challenges WHERE id=? AND status='Active' RETURNING challenge_id`,
+    await digest(code + required(c.env.TOKEN_PEPPER)),
+    principal.owner,
+    expiresAt,
+    challengeId
+  ).first();
+  if (!saved) fail(404, 'NOT_FOUND', 'This project is not open to agents.');
+  return c.json({ code, expiresAt }, 201);
+});
+auth.post('/api/agent-join/redeem', async (c) => {
+  const { code } = await json(c, z.object({ code: z.string().regex(/^ci_join_[a-f0-9]{64}$/) }).strict());
+  const db = c.env.DB;
+  const pepper = required(c.env.TOKEN_PEPPER);
+  const hash = await digest(code + pepper);
+  const plaintextToken = 'ci_agt_' + random();
+  const expiresAt = iso(86400000);
+  const eligible = `code_hash=? AND expires_at>${now}
+    AND challenge_id IN (SELECT id FROM challenges WHERE status='Active')`;
+  const [, consumed] = await db.batch<{ challenge_id: string }>([
+    sql(
+      db,
+      `INSERT INTO agent_tokens(id,owner_github_id,name,token_prefix,token_hash,scopes_json,expires_at)
+       SELECT ?,j.owner_github_id,substr('Project prompt · '||h.name,1,100),?,?,?,?
+       FROM agent_join_codes j JOIN challenges h ON h.id=j.challenge_id WHERE ${eligible}`,
+      id('tok'),
+      plaintextToken.slice(0, 14),
+      await digest(plaintextToken + pepper),
+      JSON.stringify(scopes),
+      expiresAt,
+      hash
+    ),
+    sql(db, `DELETE FROM agent_join_codes WHERE ${eligible} RETURNING challenge_id`, hash),
+  ]);
+  const grant = consumed.results[0];
+  if (!grant) fail(401, 'UNAUTHORIZED', 'The project prompt code has expired or been used. Copy a new prompt.');
+  return c.json({ plaintextToken, challengeId: grant.challenge_id, expiresAt }, 201);
 });
 auth.post('/api/agents/register', async (c) => {
   const p = await bearer(c, 'agent:register');

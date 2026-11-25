@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 export type Bindings = Omit<Env, 'APP_ORIGIN'> & {
   APP_ORIGIN: string;
+  LOCAL_DEV_AUTH_BYPASS?: string;
+  ADMIN_IP_ALLOWLIST?: string;
   SESSION_SECRET?: string;
   TOKEN_PEPPER?: string;
   GITHUB_CLIENT_ID?: string;

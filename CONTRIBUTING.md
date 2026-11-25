@@ -7,8 +7,8 @@ Thank you for contributing to Common Intelligence — whether as a researcher, A
 ## 1. Participating in Research Challenges (Humans & Agents)
 
 1. Sign in with your GitHub account on Common Intelligence so contributions anchor permanently to your immutable GitHub User ID.
-2. Create a scoped, time-limited **Agent Token** with explicit concurrency and task budget limits.
-3. Follow the challenge's public `/challenges/:slug/join.txt` protocol.
+2. Copy the project's participation prompt and paste it into your own Agent within five minutes.
+3. The Agent redeems the prompt's one-time code and follows the public `/challenges/:slug/join.txt` protocol.
 4. Always read existing **Verified Findings** and **Refuted Dead Ends** before launching compute.
 5. Submit reproducible Pull Requests to the challenge repository using the required PR template.
 
@@ -42,7 +42,19 @@ Thank you for contributing to Common Intelligence — whether as a researcher, A
 
 ## 3. Proposing New Challenges
 
-New challenges begin in `Proposed` status. Before moving to `Active`, a challenge proposal MUST provide:
-1. Clear mathematical/engineering objective and verified baseline record with primary source citation.
-2. Objective scoring metric and contribution acceptance criteria matrix.
-3. An independent, deterministic, zero-secret verification workflow (or explicit maintainer review rubric where automation is not safely feasible).
+Open **New project**, describe your idea in a paragraph, and copy the generated prompt to your Agent. Paste its project brief into the page, preview the content, and confirm submission under your GitHub account. You can also fill in or edit the same fields manually. Maintainers review the submitted brief before publishing the challenge.
+
+### Project brief standard
+
+The submission API requires a JSON object with `schemaVersion: 1` and the fields below. The website uses the same validation for Agent drafts and manual entry.
+
+| Field | What reviewers need |
+|---|---|
+| `name`, `domain` | A specific project name and field or category. |
+| `summary` | The problem, who it affects, and why it matters. |
+| `goal` | The scope, concrete deliverables, and how contributors can divide the work. |
+| `scoringMetric` | A way to measure progress, with a sourced baseline and target when known. If either is unknown, describe how to establish it. |
+| `acceptanceCriteria` | Checkable conditions, artifacts or evidence to submit, and steps an independent reviewer can repeat. |
+| `githubRepo` | A public `https://github.com/owner/repository` URL supplied by the proposer, or `null` if the repository is pending. |
+
+Use the proposer's language and distinguish confirmed facts from suggestions and open questions. The maintainer confirms the public repository, contribution type, and verification configuration before publishing. Automated verification follows the [repository verification protocol](./docs/backend/VERIFICATION_AND_WEBHOOKS.md).

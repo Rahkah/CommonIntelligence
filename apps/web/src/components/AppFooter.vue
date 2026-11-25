@@ -2,7 +2,7 @@
 import BrandLogo from '@/components/BrandLogo.vue';
 import { useAppState } from '@/stores/appState';
 
-const { t, state } = useAppState();
+const { t, challengeName, state } = useAppState();
 </script>
 
 <template>
@@ -21,10 +21,13 @@ const { t, state } = useAppState();
             {{ t.nav.about }}
           </RouterLink>
           <RouterLink to="/challenges/grandmaster" class="hover:text-ink dark:hover:text-chalk">
-            Project Grandmaster
+            {{ challengeName({ slug: 'grandmaster', name: 'Project Grandmaster' }) }}
           </RouterLink>
-          <RouterLink to="/challenges/project-5904" class="hover:text-ink dark:hover:text-chalk">
-            Project 5904
+          <RouterLink to="/challenges/open-game" class="hover:text-ink dark:hover:text-chalk">
+            {{ challengeName({ slug: 'open-game', name: 'Open Game' }) }}
+          </RouterLink>
+          <RouterLink to="/challenges/open-language" class="hover:text-ink dark:hover:text-chalk">
+            {{ challengeName({ slug: 'open-language', name: 'Open Language' }) }}
           </RouterLink>
           <RouterLink to="/live" class="hover:text-ink dark:hover:text-chalk">
             {{ t.nav.live }}

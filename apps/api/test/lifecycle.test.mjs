@@ -8,7 +8,6 @@ import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { app, sweep } from '../src/index';
 import { catalogStatements } from '../scripts/seed.mjs';
-import { verifySuperpermutation } from '@common-intelligence/shared';
 
 const origin = 'http://localhost:8787';
 const sha = '8'.repeat(40),
@@ -286,14 +285,15 @@ afterAll(async () => {
 it('runs the planner, two independent agents, PR proof, honors, dead ends, and dependency unlock end to end', async () => {
   expect((await request('/')).status).toBe(200);
   const catalog = await ok(request('/api/challenges'));
-  expect(catalog.total).toBe(13);
-  expect(catalog.items.filter((c) => c.status === 'Active')).toHaveLength(2);
+  expect(catalog.total).toBe(3);
+  expect(catalog.items.map((c) => c.slug).sort()).toEqual(['grandmaster', 'open-game', 'open-language']);
+  expect(catalog.items.filter((c) => c.status === 'Active')).toHaveLength(1);
   expect(catalog.items.find((c) => c.id === 'grandmaster').record.currentBestValue).toBeUndefined();
-  expect((await ok(request('/api/challenges/project-5904/progress'))).tasksByStatus.Available).toBe(1);
-  expect(await (await request('/challenges/project-5904/join.txt')).text()).toContain('leaseToken');
+  expect((await ok(request('/api/challenges/grandmaster/progress'))).tasksByStatus.Available).toBe(2);
+  expect(await (await request('/challenges/grandmaster/join.txt')).text()).toContain('leaseToken');
   const a = await agent(await login()),
     b = await agent(await login()),
-    cid = 'project-5904';
+    cid = await challenge();
   const plan = await ok(claim(a, cid));
   const route = '/api/tasks/' + plan.taskId + '/plan';
   const body = {
@@ -326,20 +326,17 @@ it('runs the planner, two independent agents, PR proof, honors, dead ends, and d
       )
     ).taskId
   ).toBe(tid);
-  expect(verifySuperpermutation('121', 2).valid).toBe(true);
   const submitted = {
     agentId: worker.id,
     leaseToken: lease.leaseToken,
     headSha: sha,
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/1',
+    prUrl: 'https://github.com/example/' + cid + '/pull/1',
     summary: 'Independent negative result',
   };
   await ok(request('/api/tasks/' + tid + '/submit', { headers: worker.headers, body: submitted }));
   const x = { cid, a: worker, tid };
   const pr = merged(x),
     run = check(x);
-  pr.repository.full_name = run.repository.full_name = 'common-intelligence/project-5904';
-  run.check_run.name = 'superperm-verifier-v1.0.0';
   await ok(signed('check_run', run));
   expect(await count('credentials')).toBe(0);
   await ok(signed('pull_request', pr));
@@ -596,3 +593,199 @@ it('bounds input, validates repository URLs and stores unfinished work as inconc
   expect((await ok(request('/api/knowledge?challengeId=' + x.cid + '&status=Inconclusive'))).total).toBe(1);
   expect((await ok(request('/api/knowledge?challengeId=' + x.cid + '&status=Refuted'))).total).toBe(0);
 });
+
+it('keeps project proposals private until a maintainer publishes a claimable challenge', async () => {
+  const author = await login();
+  const other = await login();
+  const list = '/api/project-proposals';
+  const queue = '/api/admin/project-proposals';
+  const slug = 'shared-planning-study';
+  const briefContent = {
+    name: 'Shared planning study',
+    domain: 'Algorithms',
+    summary: 'Compare scheduling strategies.',
+    goal: 'Reproduce the reference schedule.',
+    scoringMetric: 'Number of completed jobs',
+    acceptanceCriteria: 'Publish inputs and reproducible results.',
+  };
+  const project = { schemaVersion: 1, ...briefContent, githubRepo: null };
+  const publish = {
+    slug,
+    githubRepo: 'https://github.com/Example/Shared-Planning',
+    trustedCheckName: 'validate-schedule',
+    verificationMethod: 'Compare outputs in the pinned CI workflow.',
+    targetDisplay: 'Reproduce baseline',
+    contributionType: 'IndependentVerification',
+  };
+  const checkPrivate = async (publicSlug, name) => {
+    expect((await request('/api/challenges/' + publicSlug)).status).toBe(404);
+    expect((await request('/api/challenges/' + publicSlug + '/progress')).status).toBe(404);
+    expect((await request('/challenges/' + publicSlug + '/join.txt')).status).toBe(404);
+    expect((await ok(request('/api/challenges'))).items.some((entry) => entry.name === name)).toBe(false);
+  };
+  expect((await request(list, { body: project })).status).toBe(401);
+  expect((await request(list, { body: project, headers: { cookie: author.headers.cookie } })).status).toBe(403);
+  const invalidBriefs = [
+    project.summary,
+    briefContent,
+    { ...project, schemaVersion: 2 },
+    { ...project, schemaVersion: '1' },
+    { ...project, goal: undefined },
+    { ...project, scoringMetric: 42 },
+    { ...project, acceptanceCriteria: '    ' },
+    { ...project, name: 'x'.repeat(151) },
+    { ...project, githubRepo: 'https://github.com/example/..' },
+    { ...project, status: 'Approved' },
+  ];
+  for (const body of invalidBriefs) {
+    expect(await ok(request(list, { body, headers: author.headers }), 400))
+      .toMatchObject({ code: 'VALIDATION_ERROR' });
+  }
+  expect((await ok(request(list, { headers: author.headers }))).total).toBe(0);
+  const headers = { ...author.headers, 'Idempotency-Key': randomUUID() };
+  const created = await ok(request(list, { body: project, headers }), 201);
+  expect(created).toMatchObject({ status: 'Pending', schemaVersion: 1 });
+  expect(created.githubRepo).toBeUndefined();
+  expect(await ok(request(list, { body: project, headers }), 201)).toEqual(created);
+  expect((await request(list, { body: { ...project, name: 'Different' }, headers })).status).toBe(409);
+  await checkPrivate(slug, project.name);
+  const authorList = await request(list, { headers: author.headers });
+  expect(authorList.headers.get('Cache-Control')).toBe('no-store');
+  expect((await ok(authorList)).items).toEqual([created]);
+  expect((await ok(request(list, { headers: other.headers }))).items).toEqual([]);
+  expect((await request(queue, { headers: author.headers })).status).toBe(403);
+  expect((await ok(request('/api/me', { headers: admin.headers }))).canReviewProjects).toBe(true);
+  expect((await ok(request(queue, { headers: admin.headers }))).items).toContainEqual(created);
+  const approveProject = queue + '/' + created.id + '/approve';
+  expect((await request(approveProject, { body: publish, headers: author.headers })).status).toBe(403);
+  expect((await request(approveProject, {
+    body: { ...publish, contributionType: 'RecordImprovement' }, headers: admin.headers,
+  })).status).toBe(400);
+
+  const decisions = await Promise.all([1, 2].map(() => request(approveProject, { body: publish, headers: admin.headers })));
+  expect(decisions.map((response) => response.status).sort()).toEqual([200, 409]);
+  expect(await ok(decisions.find((response) => response.ok))).toMatchObject({
+    status: 'Approved', challengeSlug: slug,
+  });
+  const catalog = await ok(request('/api/challenges?status=Active'));
+  expect(catalog.items[1]).toMatchObject({ slug, stats: { openTasksCount: 1 } });
+  expect(await ok(request('/api/challenges/' + slug))).toMatchObject({
+    status: 'Active', githubRepo: publish.githubRepo, scoringMetric: text(project.scoringMetric),
+  });
+  expect(await (await request('/challenges/' + slug + '/join.txt')).text()).toContain(project.acceptanceCriteria);
+  const participant = await agent(other);
+  const claimed = await ok(claim(participant, slug));
+  expect((await ok(request('/api/tasks/' + claimed.taskId))).isPlanning).toBe(true);
+
+  const rejectedProject = { ...project, githubRepo: undefined, name: 'Another planning study' };
+  const next = await ok(request(list, { body: rejectedProject, headers: author.headers }), 201);
+  const nextPath = queue + '/' + next.id;
+  const conflicting = { ...publish, slug: 'another-planning-study', githubRepo: publish.githubRepo.toLowerCase() };
+  expect((await request(nextPath + '/approve', { body: conflicting, headers: admin.headers })).status).toBe(409);
+  expect((await request(nextPath + '/reject', { body: { reason: ' ' }, headers: admin.headers })).status).toBe(400);
+  const reason = 'Provide an independent dataset.';
+  expect(await ok(request(nextPath + '/reject', { body: { reason }, headers: admin.headers })))
+    .toMatchObject({ status: 'Rejected', rejectionReason: reason, challengeSlug: null });
+  await checkPrivate(conflicting.slug, rejectedProject.name);
+  expect((await ok(request(list, { headers: author.headers }))).items)
+    .toContainEqual(expect.objectContaining({ id: next.id, status: 'Rejected', rejectionReason: reason }));
+
+  await query(
+    'INSERT INTO project_proposals(id,author_github_id,proposal_json,submitted_at) VALUES(?,?,?,?)',
+    'legacy-brief', String(other.uid), JSON.stringify(briefContent), new Date().toISOString()
+  ).run();
+  const legacy = (await ok(request(list, { headers: other.headers }))).items[0];
+  expect(legacy).toMatchObject({ id: 'legacy-brief', ...briefContent });
+  expect(legacy.schemaVersion).toBeUndefined();
+}, 30000);
+
+it('authorizes a full Agent session from a project prompt and consumes the code once', async () => {
+  const operator = await login();
+  const join = '/api/agent-join';
+  const body = { challengeId: 'grandmaster' };
+  expect((await request(join, { body })).status).toBe(401);
+  expect((await request(join, { body, headers: { cookie: operator.headers.cookie } })).status).toBe(403);
+  expect((await request(join, { body: { challengeId: 'missing' }, headers: operator.headers })).status).toBe(404);
+  const prompt = await request(join, { body, headers: operator.headers });
+  expect(prompt.headers.get('Cache-Control')).toBe('no-store');
+  const { code, expiresAt } = await ok(prompt, 201);
+  expect(expiresAt).toBeTruthy();
+  const redemptions = await Promise.all([1, 2].map(() => request(join + '/redeem', { body: { code } })));
+  expect(redemptions.map((response) => response.status).sort()).toEqual([201, 401]);
+  const { plaintextToken, challengeId } = await ok(redemptions.find((response) => response.ok), 201);
+  expect(challengeId).toBe('grandmaster');
+  const { items } = await ok(request('/api/agent-tokens', { headers: operator.headers }));
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({
+    scopes: ['agent:register', 'tasks:read', 'tasks:claim', 'tasks:propose', 'knowledge:read'],
+    maxConcurrentTasks: 1,
+    maxTotalTasks: 5,
+  });
+  const headers = { Authorization: 'Bearer ' + plaintextToken };
+  const agent = await ok(request('/api/agents/register', {
+    headers, body: { challengeId, label: 'prompt agent', selfReportedModel: 'test', selfReportedClient: 'test' },
+  }), 201);
+  expect(agent.ownerGithubId).toBe(String(operator.uid));
+  expect((await request('/api/admin/project-proposals', { headers })).status).toBe(403);
+  expect((await claim({ id: agent.id, headers }, challengeId)).status).toBe(200);
+  await ok(request('/api/agent-tokens/' + items[0].id, { headers: operator.headers, method: 'DELETE' }), 204);
+  expect((await request('/api/knowledge', { headers })).status).toBe(401);
+
+  const expired = await ok(request(join, { body, headers: operator.headers }), 201);
+  await query('UPDATE agent_join_codes SET expires_at=? WHERE owner_github_id=?', '2000-01-01T00:00:00.000Z', String(operator.uid)).run();
+  expect((await request(join + '/redeem', { body: { code: expired.code } })).status).toBe(401);
+});
+
+it('seeds phased starter task pools and restricts /admin console to allowlisted IPs', async () => {
+  const gmTasks = await ok(request('/api/tasks?challengeId=grandmaster'));
+  expect(gmTasks.items.map((t) => t.taskId)).toContain('TASK-GM-P1-01');
+  expect(gmTasks.items.map((t) => t.taskId)).toContain('TASK-GM-P1-02');
+  expect(gmTasks.items.find((t) => t.taskId === 'TASK-GM-P1-02').dependencies).toEqual(['TASK-GM-P1-01']);
+
+  const ogTasks = await ok(request('/api/tasks?challengeId=open-game'));
+  expect(ogTasks.items.map((t) => t.taskId)).toContain('TASK-OG-P1-01');
+  expect(ogTasks.items.map((t) => t.taskId)).toContain('TASK-OG-P3-01');
+
+  const olTasks = await ok(request('/api/tasks?challengeId=open-language'));
+  expect(olTasks.items.map((t) => t.taskId)).toContain('TASK-OL-P1-01');
+  expect(olTasks.items.map((t) => t.taskId)).toContain('TASK-OL-P3-02');
+
+  const prevAllowlist = env.ADMIN_IP_ALLOWLIST;
+  env.ADMIN_IP_ALLOWLIST = '141.11.146.88';
+  try {
+    expect((await request('/admin', { headers: { 'CF-Connecting-IP': '203.0.113.9' } })).status).toBe(403);
+    expect(
+      (await request('/api/admin/console/overview', { headers: { 'CF-Connecting-IP': '203.0.113.9' } })).status
+    ).toBe(403);
+
+    expect((await request('/admin', { headers: { 'CF-Connecting-IP': '141.11.146.88' } })).status).toBe(200);
+    const overview = await ok(
+      request('/api/admin/console/overview', { headers: { 'CF-Connecting-IP': '141.11.146.88' } })
+    );
+    expect(overview.clientIp).toBe('141.11.146.88');
+    expect(overview.summary.challengesTotal).toBeGreaterThanOrEqual(3);
+
+    // Cross-origin mutation must be blocked even from an allowlisted IP
+    expect(
+      (
+        await request('/api/admin/console/tasks/TASK-OG-P1-01/status', {
+          method: 'PATCH',
+          headers: { 'CF-Connecting-IP': '141.11.146.88', Origin: 'https://evil.example' },
+          body: { status: 'Available' },
+        })
+      ).status
+    ).toBe(403);
+
+    // Same-origin mutation from allowlisted IP succeeds
+    const patched = await ok(
+      request('/api/admin/console/tasks/TASK-OG-P1-01/status', {
+        method: 'PATCH',
+        headers: { 'CF-Connecting-IP': '141.11.146.88', Origin: origin },
+        body: { status: 'Available' },
+      })
+    );
+    expect(patched).toMatchObject({ taskId: 'TASK-OG-P1-01', status: 'Available' });
+  } finally {
+    env.ADMIN_IP_ALLOWLIST = prevAllowlist;
+  }
+}, 20000);

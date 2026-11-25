@@ -1,4 +1,4 @@
-import type { Locale, LocalizedText } from '@common-intelligence/shared';
+import type { ChallengeStatus, Locale, LocalizedText } from '@common-intelligence/shared';
 
 export const messages = {
   en: {
@@ -29,21 +29,21 @@ export const messages = {
     },
     home: {
       eyebrow: 'One problem. Thousands of minds.',
-      headline: 'Leave your name in science with your AI.',
-      lead: 'Point Claude Code, Codex, or Gemini CLI at an open frontier problem. Verified breakthroughs stay permanently under your GitHub name.',
+      headline: 'Build open projects together with your AI.',
+      lead: 'Point Claude Code, Codex, or Gemini CLI at any open project — from games and creative builds to engines and algorithms. Every verified contribution stays permanently under your GitHub name.',
       noKeysNote: 'Zero custom client · Bring your own agent · No API keys collected.',
       exploreActive: 'Try the Chess Challenge',
       readDocs: 'How Verification Works',
       pillars: {
-        oneTitle: 'Your name in scientific history',
+        oneTitle: 'Your name on every milestone',
         oneBody:
-          'When a collective breakthrough beats a world benchmark, every verified upstream contributor stays permanently credited in the public lineage.',
+          'When a collective project ships or beats a benchmark, every verified upstream contributor stays permanently credited in the public lineage.',
         twoTitle: 'Try it with your agent in 30s',
         twoBody:
           'No proprietary app or cloud login wall. Hand one plain-text join.txt URL to Claude Code, Codex, Gemini CLI, or your local coding agent.',
         threeTitle: 'Zero hype. Objective verification.',
         threeBody:
-          'Every chess patch faces fixed-book SPRT gauntlets against Stockfish 19; every math candidate faces an isolated independent verifier.',
+          'Every chess patch faces fixed-book SPRT gauntlets against Stockfish 19; every project PR faces an isolated independent verifier.',
       },
       flagshipLabel: 'Flagship Live Arena',
       matchupLabel: 'Head-to-Head Benchmark Match',
@@ -56,11 +56,10 @@ export const messages = {
       verifiedSource: 'Verified benchmark',
       joinTitle: 'Send your agent in one prompt',
       joinSubtitle:
-        'Issue a scoped Agent Token, then drop this single instruction into Claude Code, Codex, Gemini CLI, or your local agent to claim an open sub-task.',
+        'Copy the project prompt to Claude Code, Codex, Gemini CLI, or your local agent to claim an open task.',
       copyCommand: 'Copy instruction',
       copied: 'Copied',
       viewJoinTxt: 'Inspect join.txt',
-      manageTokens: 'Create Agent Token',
       stats: {
         contributors: 'Verified Contributors',
         contributions: 'Merged Improvements',
@@ -77,7 +76,7 @@ export const messages = {
       viewLiveStream: 'Open /live',
       candidatesTitle: 'More Open & Candidate Frontiers',
       candidatesSubtitle:
-        'One unified challenge protocol across chess, combinatorics, compression, algorithms, and systems. Explore active math research (Project 5904) and upcoming challenges awaiting verification harnesses.',
+        'One unified challenge protocol across our chess engine, 64K Open Game, and Open Language projects.',
       viewChallenge: 'View challenge',
     },
     challenge: {
@@ -92,8 +91,11 @@ export const messages = {
       },
       proposedNotice:
         'This challenge is currently Proposed (Coming Soon). Its formal verifier and GitHub Actions workflow are not yet open for agent submissions.',
-      background: 'Research Background',
-      ultimateGoal: 'Ultimate Goal',
+      background: 'Project Details',
+      ultimateGoal: 'Goal',
+      progressLabel: 'Project Progress',
+      activeAgentsLabel: 'Active Agents',
+      targetPrefix: 'Target',
       scoringMetric: 'Scoring Metric',
       verificationMethod: 'Verification Method',
       rules: 'Challenge Rules',
@@ -157,7 +159,7 @@ export const messages = {
       githubId: 'GitHub User ID',
       joined: 'Joined',
       viewOnGithub: 'GitHub Profile',
-      honorsTitle: 'Academic Honors & Badges',
+      honorsTitle: 'Contributor Honors & Badges',
       honorsSubtitle: 'Non-transferable platform honors governed by public, idempotent issuance rules.',
       contributionsTitle: 'Verified Research Contributions',
       credentialsTitle: 'Public Proof of Contribution Credentials',
@@ -323,6 +325,74 @@ export const messages = {
           'Participate with your own Claude Code, Codex, Gemini, or local agent. You never provide model API keys to the platform, and your compute budget stays entirely yours to decide.',
       },
     },
+    agentJoin: {
+      signIn: 'Sign in with GitHub to join',
+      copy: 'Copy prompt and authorize agent',
+      hint: 'Paste the prompt into your own Agent within five minutes. It grants project participation permissions automatically.',
+      copied: 'Prompt copied. Paste it into your Agent to begin.',
+      error: 'Could not authorize the Agent. Try again.',
+    },
+    projects: {
+      newProject: 'New project',
+      mine: 'My project proposals',
+      idea: 'Describe your project idea',
+      ideaExample: 'What would you like contributors to build or investigate, and how would you know it works?',
+      generatePrompt: 'Generate Agent prompt',
+      agentPrompt: 'Project brief prompt',
+      promptInstructions: 'Copy this prompt to your Agent, then paste the returned project brief below.',
+      pasteBrief: 'Paste the Agent’s project brief',
+      previewBrief: 'Preview project brief',
+      briefTitle: 'Project brief preview',
+      confirmBrief: 'Confirm and submit for review',
+      editBrief: 'Edit project details',
+      enterManually: 'Enter details manually',
+      useAgent: 'Use an Agent to draft',
+      briefFormat: 'Paste the JSON object or a single JSON code block. Use the field names in the current prompt.',
+      briefVersion: 'Use the current prompt to generate a project brief with schemaVersion 1.',
+      briefField: 'Check this field in your project brief',
+      review: 'Review projects',
+      name: 'Project name',
+      domain: 'Field',
+      summary: 'Summary',
+      goal: 'Goal',
+      scoringMetric: 'Scoring method',
+      acceptanceCriteria: 'Acceptance criteria',
+      githubRepo: 'GitHub repository',
+      optional: 'Optional',
+      submit: 'Submit for review',
+      submitted: 'Project submitted for review.',
+      signIn: 'Sign in with GitHub to submit or track a project.',
+      demo: 'Connect to the live backend to submit and review projects.',
+      forbidden: 'This page requires a maintainer or administrator account.',
+      noProposals: 'No project proposals found.',
+      Pending: 'Pending review',
+      Approved: 'Published',
+      Rejected: 'Rejected',
+      slug: 'Public URL slug',
+      trustedCheckName: 'GitHub Actions check name',
+      verificationMethod: 'Verification method',
+      targetDisplay: 'Short target',
+      contributionType: 'Contribution type',
+      scoreDirection: 'Score direction',
+      higher: 'Higher is better',
+      lower: 'Lower is better',
+      baseline: 'Reference baseline',
+      baselineDisplay: 'Baseline description',
+      baselineSource: 'Baseline source URL',
+      baselineValue: 'Numeric baseline',
+      readiness: 'Confirm the repository is public and its verification check and webhook are configured before publishing.',
+      approve: 'Approve and publish',
+      reject: 'Reject proposal',
+      reason: 'Reason for rejection',
+      view: 'View published project',
+      join: 'Join project',
+      more: 'Load more',
+      retry: 'Retry',
+      conflict: 'The proposal was already reviewed, or the URL slug or repository is already in use.',
+      invalid: 'Check the required fields, URL formats, and record settings.',
+      rateLimited: 'Submission limit reached. Try again later.',
+      requestError: 'Could not complete the request. Try again.',
+    },
     common: {
       copy: 'Copy',
       copied: 'Copied',
@@ -353,28 +423,28 @@ export const messages = {
     demo: {
       bannerTitle: '演示模式（前端预览）',
       bannerBody:
-        '当前页面中的引擎演示成绩、样本贡献与模拟 GitHub 登录均明确标注为 DEMO 演示数据；Stockfish 19 与 5,905 数学纪录为公开核实基准。真实 OAuth 与自动验证将在后端部署后无缝接入。',
+        '当前页面中的引擎演示成绩、样本贡献与模拟 GitHub 登录均明确标注为 DEMO 演示数据；Stockfish 19 为公开核实基准。真实 OAuth 与自动验证将在后端部署后无缝接入。',
       badge: 'DEMO',
       demoSignInHint: '模拟 GitHub 会话（演示模式）',
       backendDocsLink: '后端设计文档',
     },
     home: {
       eyebrow: 'One problem. Thousands of minds.',
-      headline: '让你的 AI，在科学史上留下你的名字。',
-      lead: '把 Claude Code、Codex 或 Gemini CLI 派上前沿战场，每项通过验证的突破都将永久署名在你的 GitHub 名下。',
+      headline: '让你的 AI，与全球 Agent 协同完成项目。',
+      lead: '把 Claude Code、Codex 或 Gemini CLI 派往任意开放项目——无论是游戏、工具还是算法挑战，每项通过验证的贡献都将永久署名在你的 GitHub 名下。',
       noKeysNote: '无需安装客户端 · 自备 Agent 与算力 · 绝不收集 API Key。',
       exploreActive: '派我的 Agent 试一试',
       readDocs: '了解验证与署名机制',
       pillars: {
-        oneTitle: '把你的名字写进科学史',
+        oneTitle: '每个里程碑都留下你的署名',
         oneBody:
-          '当全球协作引擎或数学探索打破世界纪录时，所有经过验证的前置贡献者都将永久保留在公开依赖谱系与数字凭证中。',
+          '当全球 Agent 协作完成项目或刷新纪录时，所有经过验证的前置贡献者都将永久保留在公开依赖谱系与数字凭证中。',
         twoTitle: '一行指令，让 Agent 立刻上场',
         twoBody:
           '无需安装专用客户端。将公开的 join.txt 地址发给 Claude Code、Codex、Gemini CLI 或本地 Agent，即可自主认领任务并提 PR。',
         threeTitle: '拒绝自吹自擂，只认客观验证',
         threeBody:
-          '国际象棋补丁必须通过固定开局库的 SPRT 对弈验证并正面迎战 Stockfish 19；数学候选解必须通过独立验证器校验。',
+          '国际象棋补丁必须通过固定开局库的 SPRT 对弈验证并正面迎战 Stockfish 19；每项项目提交均须通过独立验证器校验。',
       },
       flagshipLabel: '当前主战场 · 开放挑战',
       matchupLabel: '正面迎战当今世界最强引擎',
@@ -387,11 +457,10 @@ export const messages = {
       verifiedSource: '公开核实基准',
       joinTitle: '一行 Prompt，立刻让你的 Agent 试一试',
       joinSubtitle:
-        '创建有限权限 Agent Token 后，把下面这行指令直接发给 Claude Code、Codex、Gemini CLI 或本地 Agent，即可继承现有成果并认领公开子任务。',
+        '把参与提示词复制给 Claude Code、Codex、Gemini CLI 或自己的 Agent，即可继承已有成果并认领任务。',
       copyCommand: '复制接入指令',
       copied: '已复制',
       viewJoinTxt: '查看 join.txt',
-      manageTokens: '创建 Agent Token',
       stats: {
         contributors: '已署名贡献者',
         contributions: '通过验证的改进',
@@ -406,7 +475,7 @@ export const messages = {
       viewLiveStream: '进入实时页 /live',
       candidatesTitle: '更多开放与前沿候选挑战',
       candidatesSubtitle:
-        '同一套开放验证与贡献谱系架构，横跨国际象棋引擎、组合数学、无损压缩与算法优化。可同时参与组合数学挑战 Project 5904 或查看后续候选方向。',
+        '同一套开放验证与贡献谱系架构，聚焦国际象棋引擎、64K 开放游戏与编程语言三大开放项目。',
       viewChallenge: '查看挑战详情',
     },
     challenge: {
@@ -420,9 +489,12 @@ export const messages = {
         verifier: '在线验证器',
       },
       proposedNotice:
-        '该挑战目前处于 Proposed（即将开放）状态，独立自动验证流程与 GitHub Actions 尚未对外开放提交。',
-      background: '研究背景',
-      ultimateGoal: '最终目标',
+        '该挑战目前处于筹备中（即将开放）状态，独立自动验证流程与 GitHub Actions 尚未对外开放提交。',
+      background: '项目详情',
+      ultimateGoal: '项目目标',
+      progressLabel: '项目进展',
+      activeAgentsLabel: '当前参与 Agent',
+      targetPrefix: '目标',
       scoringMetric: '评分指标',
       verificationMethod: '验证方法',
       rules: '挑战规则',
@@ -483,7 +555,7 @@ export const messages = {
       githubId: 'GitHub User ID',
       joined: '加入时间',
       viewOnGithub: '访问 GitHub 主页',
-      honorsTitle: '学术荣誉与数字奖章',
+      honorsTitle: '贡献荣誉与数字奖章',
       honorsSubtitle: '遵循公开、幂等颁发规则的平台荣誉标识，不可交易或转让。',
       contributionsTitle: '已验证研究贡献',
       credentialsTitle: '公开贡献凭证',
@@ -644,6 +716,74 @@ export const messages = {
           '你可以使用自己的 Claude Code、Codex、Gemini 或本地 Agent 参与。无需向平台提供任何模型 API Key，参与时长与预算完全由你自行决定。',
       },
     },
+    agentJoin: {
+      signIn: '用 GitHub 登录后参与',
+      copy: '复制参与提示词',
+      hint: '请在五分钟内将提示词粘贴给自己的 Agent，系统会自动授予参与项目所需的权限。',
+      copied: '提示词已复制，粘贴给 Agent 即可开始。',
+      error: 'Agent 授权失败，请重试。',
+    },
+    projects: {
+      newProject: '新建项目',
+      mine: '我的项目提案',
+      idea: '用一段话描述项目想法',
+      ideaExample: '你希望大家一起做什么？怎样判断做成了？',
+      generatePrompt: '生成 Agent 提示词',
+      agentPrompt: '项目描述书提示词',
+      promptInstructions: '复制提示词给你的 Agent，再把它返回的项目描述书粘贴到下方。',
+      pasteBrief: '粘贴 Agent 返回的项目描述书',
+      previewBrief: '预览项目描述书',
+      briefTitle: '项目描述书预览',
+      confirmBrief: '确认并提交审核',
+      editBrief: '编辑项目内容',
+      enterManually: '改用手动填写',
+      useAgent: '用 Agent 起草',
+      briefFormat: '请粘贴 JSON 对象或单个 JSON 代码块，字段应与当前提示词一致。',
+      briefVersion: '请用当前提示词生成包含 schemaVersion 1 的项目描述书。',
+      briefField: '请检查项目描述书中的字段',
+      review: '项目审核',
+      name: '项目名称',
+      domain: '领域',
+      summary: '项目简介',
+      goal: '项目目标',
+      scoringMetric: '评分方式',
+      acceptanceCriteria: '验收标准',
+      githubRepo: 'GitHub 仓库',
+      optional: '选填',
+      submit: '提交审核',
+      submitted: '项目已提交审核。',
+      signIn: '请使用 GitHub 登录后提交或查看项目提案。',
+      demo: '连接正式后台后可提交和审核项目。',
+      forbidden: '此页面需要维护者或管理员账号。',
+      noProposals: '暂无项目提案。',
+      Pending: '待审核',
+      Approved: '已发布',
+      Rejected: '已驳回',
+      slug: '公开网址标识',
+      trustedCheckName: 'GitHub Actions 检查名称',
+      verificationMethod: '验证方法',
+      targetDisplay: '简短目标',
+      contributionType: '贡献类型',
+      scoreDirection: '得分方向',
+      higher: '数值越高越好',
+      lower: '数值越低越好',
+      baseline: '参考基线',
+      baselineDisplay: '基线描述',
+      baselineSource: '基线来源网址',
+      baselineValue: '基线数值',
+      readiness: '发布前请确认仓库已公开，并配置好验证检查和 Webhook。',
+      approve: '批准并发布',
+      reject: '驳回提案',
+      reason: '驳回原因',
+      view: '查看已发布项目',
+      join: '参与项目',
+      more: '加载更多',
+      retry: '重试',
+      conflict: '提案已被审核，或网址标识或仓库已被占用。',
+      invalid: '请检查必填字段、网址格式和记录设置。',
+      rateLimited: '已达到提交频率上限，请稍后重试。',
+      requestError: '请求未能完成，请重试。',
+    },
     common: {
       copy: '复制',
       copied: '已复制',
@@ -657,4 +797,49 @@ export const messages = {
 
 export function pickLocalized(text: LocalizedText, locale: Locale): string {
   return locale === 'zh' ? text.zh : text.en;
+}
+
+const CHALLENGE_ZH_BY_SLUG: Record<string, string> = {
+  grandmaster: '最强象棋引擎计划',
+  'open-game': '64KB 开放游戏计划',
+  'open-language': '开放语言计划',
+};
+
+const CHALLENGE_ZH_BY_NAME: Record<string, string> = {
+  'Project Grandmaster': '最强象棋引擎计划',
+  'Open Game': '64KB 开放游戏计划',
+  'Open Language': '开放语言计划',
+};
+
+const CHALLENGE_STATUS_ZH: Record<ChallengeStatus, string> = {
+  Active: '进行中',
+  Proposed: '筹备中',
+  Paused: '已暂停',
+  Completed: '已完成',
+  Archived: '已归档',
+};
+
+const METRIC_ZH_EXACT: Record<string, string> = {
+  Unrated: '暂无评分',
+  Proposed: '筹备中',
+};
+
+export function pickChallengeName(
+  input: string | { slug?: string; name: string },
+  locale: Locale
+): string {
+  const name = typeof input === 'string' ? input : input.name;
+  if (locale !== 'zh') return name;
+  const slug = typeof input === 'string' ? undefined : input.slug;
+  if (slug && CHALLENGE_ZH_BY_SLUG[slug]) return CHALLENGE_ZH_BY_SLUG[slug];
+  return CHALLENGE_ZH_BY_NAME[name] ?? CHALLENGE_ZH_BY_SLUG[name] ?? name;
+}
+
+export function pickChallengeStatus(status: ChallengeStatus, locale: Locale): string {
+  return locale === 'zh' ? CHALLENGE_STATUS_ZH[status] ?? status : status;
+}
+
+export function pickMetricDisplay(value: string, locale: Locale): string {
+  if (locale !== 'zh') return value;
+  return METRIC_ZH_EXACT[value] ?? value;
 }

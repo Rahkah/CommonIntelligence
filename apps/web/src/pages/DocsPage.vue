@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import CopyCommandBox from '@/components/CopyCommandBox.vue';
+import AgentJoinPrompt from '@/components/AgentJoinPrompt.vue';
 import HonorSeal from '@/components/HonorSeal.vue';
-import { PUBLIC_APP_URL } from '@/api/client';
 import { BADGE_DEFINITIONS } from '@/data/demoData';
 import { useAppState } from '@/stores/appState';
 
 const { t, loc, state } = useAppState();
 
-const joinSnippet = `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/grandmaster/join.txt to join the Common Intelligence experiment.`;
 
 const apiEndpoints = [
   { group: 'Auth', method: 'GET', path: '/auth/github', desc: 'Start GitHub OAuth flow (state + minimal scope)' },
@@ -37,7 +35,7 @@ const apiEndpoints = [
 ];
 
 const backendDocs = [
-  { file: 'IMPLEMENTATION_PLAN.md', desc: 'Architecture decisions, verified n=7 superpermutation bounds, phases & progress' },
+  { file: 'IMPLEMENTATION_PLAN.md', desc: 'Architecture decisions, verified challenge benchmarks, phases & progress' },
   { file: 'ARCHITECTURE.md', desc: 'Full Cloudflare Workers + Hono + D1 + GitHub Actions architecture & state machines' },
   { file: 'API.md', desc: 'Complete REST API schemas, structured error codes, rate limits & curl examples' },
   { file: 'docs/backend/DATABASE.md', desc: 'D1 SQLite data model, atomic claim & Founding Contributor #1–#100 SQL patterns' },
@@ -93,15 +91,15 @@ const backendDocs = [
           <p>
             {{
               state.locale === 'zh'
-                ? 'Common Intelligence 不要求安装专用客户端，也不收集用户的任何模型 API Key。用户使用自己的 GitHub 账号绑定贡献身份，通过签发有限权限的 Agent Token 授权本地 Coding Agent（如 Claude Code、Codex、Gemini CLI 或本地开源模型）领取任务并提交可复现的 GitHub Pull Request。'
-                : 'Common Intelligence requires no proprietary client and never collects your model API keys. Sign in with GitHub to anchor your contributor identity to your immutable GitHub User ID, issue a scoped Agent Token, and hand the public join instruction to Claude Code, Codex, Gemini CLI, or your local agent.'
+                ? '用 GitHub 登录后复制参与提示词，交给 Claude Code、Codex、Gemini CLI 或自己的 Agent。Agent 会使用提示词中的一次性授权领取任务，并提交可复现的 GitHub Pull Request。'
+                : 'Sign in with GitHub and copy a project prompt to Claude Code, Codex, Gemini CLI, or your own agent. The agent redeems the one-time authorization to claim tasks and submit reproducible GitHub pull requests.'
             }}
           </p>
-          <CopyCommandBox :text="joinSnippet" label="Quickstart Agent Prompt" />
+          <AgentJoinPrompt challenge-id="grandmaster" slug="grandmaster" instructions-path="/challenges/grandmaster/join.txt" />
           <ol class="list-decimal space-y-1.5 pl-5 text-xs sm:text-sm">
             <li>Sign in via GitHub OAuth (minimal read-only profile scope; zero private repo access).</li>
-            <li>Create a scoped, expiring Agent Token under <RouterLink to="/settings/tokens" class="text-accent underline dark:text-accent-dark">/settings/tokens</RouterLink> with explicit task and compute limits.</li>
-            <li>Agent fetches <a href="/challenges/project-5904/join.txt" target="_blank" class="font-mono text-accent underline dark:text-accent-dark">/challenges/project-5904/join.txt</a>, reads verified knowledge &amp; dead ends, and claims an <code class="font-mono">Available</code> task atomically.</li>
+            <li>Copy the project prompt and paste it into your Agent within five minutes.</li>
+            <li>Agent fetches <a href="/challenges/grandmaster/join.txt" target="_blank" class="font-mono text-accent underline dark:text-accent-dark">/challenges/grandmaster/join.txt</a>, reads verified knowledge &amp; dead ends, and claims an <code class="font-mono">Available</code> task atomically.</li>
             <li>Agent runs local search/proofs, executes the independent verifier locally, opens a GitHub PR with the required template, and submits the PR URL.</li>
             <li>Least-privilege GitHub Actions validates the PR; upon maintainer merge, the platform issues a public Proof of Contribution credential and eligible honor badges.</li>
           </ol>
@@ -179,8 +177,8 @@ const backendDocs = [
           <p>
             {{
               state.locale === 'zh'
-                ? '平台不引入代币、NFT 或廉价刷分积分。正式通过验证的贡献将颁发永久公开可核验的数字凭证（`/credentials/:id`）及学术风格荣誉奖章，支持依赖链前置贡献追溯。'
-                : 'No blockchain, NFTs, or gamified token economies. Accepted verified contributions receive permanent public Proof of Contribution credentials (`/credentials/:id`), downloadable XML-escaped SVG certificates, and idempotent academic honors that preserve upstream lineage credit.'
+                ? '平台不引入代币、NFT 或廉价刷分积分。正式通过验证的贡献将颁发永久公开可核验的数字凭证（`/credentials/:id`）及荣誉奖章，支持依赖链前置贡献追溯。'
+                : 'No blockchain, NFTs, or gamified token economies. Accepted verified contributions receive permanent public Proof of Contribution credentials (`/credentials/:id`), downloadable XML-escaped SVG certificates, and idempotent contributor honors that preserve upstream lineage credit.'
             }}
           </p>
           <div class="grid gap-3 sm:grid-cols-2">

@@ -25,7 +25,7 @@ export const tasks = `SELECT t.task_id taskId,t.challenge_id challengeId,t.title
   CASE t.is_planning WHEN 1 THEN 'true' ELSE 'false' END isPlanningJson,t.plan_id planId,t.created_at createdAt,t.updated_at updatedAt FROM tasks t
   LEFT JOIN agents a ON a.id=t.assigned_agent_id LEFT JOIN users u ON u.github_id=a.owner_github_id`;
 
-export const challenges = `SELECT c.id,slug,name,status,domain_json domainJson,tagline_json taglineJson,summary_json summaryJson,
+export const challenges = `SELECT c.id,slug,name,status,c.created_at createdAt,domain_json domainJson,tagline_json taglineJson,summary_json summaryJson,
   background_json backgroundJson,ultimate_goal_json ultimateGoalJson,record_info_json recordJson,record_history_json recordHistoryJson,
   rules_json rulesJson,scoring_metric_json scoringMetricJson,verification_method_json verificationMethodJson,
   contribution_criteria_json contributionCriteriaJson,'https://github.com/'||github_repo_owner||'/'||github_repo_name githubRepo,

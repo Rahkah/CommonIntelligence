@@ -6,7 +6,7 @@ import StatusPill from '@/components/StatusPill.vue';
 import { apiClient } from '@/api/client';
 import { useAppState } from '@/stores/appState';
 
-const { t, loc, state } = useAppState();
+const { t, loc, challengeName, state } = useAppState();
 
 const events = ref<ActivityEvent[]>([]);
 const loading = ref(true);
@@ -183,7 +183,7 @@ function eventTone(type: ActivityEventType) {
               :to="`/challenges/${evt.challengeSlug}`"
               class="font-mono text-xs font-medium text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
             >
-              {{ evt.challengeName }}
+              {{ challengeName({ slug: evt.challengeSlug, name: evt.challengeName }) }}
             </RouterLink>
             <span v-if="evt.taskId" class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
               · {{ evt.taskId }}

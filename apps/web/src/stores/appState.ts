@@ -1,7 +1,13 @@
 import { computed, reactive } from 'vue';
-import type { Locale, LocalizedText, UserProfileSummary } from '@common-intelligence/shared';
+import type { ChallengeStatus, Locale, LocalizedText, UserProfileSummary } from '@common-intelligence/shared';
 import { apiClient, DATA_MODE } from '@/api/client';
-import { messages, pickLocalized } from '@/i18n/messages';
+import {
+  messages,
+  pickChallengeName,
+  pickChallengeStatus,
+  pickLocalized,
+  pickMetricDisplay,
+} from '@/i18n/messages';
 
 export type ThemeMode = 'light' | 'dark';
 
@@ -38,6 +44,7 @@ const state = reactive({
   theme: getInitialTheme() as ThemeMode,
   dataMode: DATA_MODE,
   user: null as UserProfileSummary | null,
+  canReviewProjects: false,
   authLoaded: false,
   toasts: [] as ToastItem[],
 });
@@ -85,6 +92,18 @@ export function useAppState() {
     return pickLocalized(text, state.locale);
   }
 
+  function challengeName(input: string | { slug?: string; name: string }): string {
+    return pickChallengeName(input, state.locale);
+  }
+
+  function challengeStatus(status: ChallengeStatus): string {
+    return pickChallengeStatus(status, state.locale);
+  }
+
+  function metricDisplay(value: string): string {
+    return pickMetricDisplay(value, state.locale);
+  }
+
   function notify(message: string) {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     state.toasts.push({ id, message });
@@ -98,6 +117,10 @@ export function useAppState() {
     try {
       const session = await apiClient.getMe();
       state.user = session.user;
+      state.canReviewProjects = session.canReviewProjects === true;
+    } catch {
+      state.user = null;
+      state.canReviewProjects = false;
     } finally {
       state.authLoaded = true;
     }
@@ -120,6 +143,7 @@ export function useAppState() {
   async function signOut() {
     await apiClient.logout();
     state.user = null;
+    state.canReviewProjects = false;
     notify(state.locale === 'zh' ? '已退出登录' : 'Signed out');
   }
 
@@ -127,6 +151,9 @@ export function useAppState() {
     state,
     t,
     loc,
+    challengeName,
+    challengeStatus,
+    metricDisplay,
     setLocale,
     toggleLocale,
     setTheme,

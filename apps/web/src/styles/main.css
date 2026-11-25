@@ -50,3 +50,27 @@
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+@layer components {
+  .project-panel {
+    @apply rounded-md border border-border-light bg-surface p-5 dark:border-border-dark dark:bg-obsidian-surface;
+  }
+  .project-field {
+    @apply block min-w-0 space-y-1.5 text-sm font-medium;
+  }
+  .project-field :is(input, textarea, select), select.project-field {
+    @apply block w-full rounded border border-border-light bg-paper px-3 py-2 text-sm font-normal focus-visible:outline-accent dark:border-border-dark dark:bg-obsidian dark:focus-visible:outline-accent-dark;
+  }
+  .project-button {
+    @apply inline-flex w-fit items-center gap-2 rounded bg-ink px-3.5 py-2 text-sm font-medium text-paper hover:opacity-90 disabled:opacity-50 dark:bg-chalk dark:text-obsidian;
+  }
+  .project-link {
+    @apply text-sm font-medium text-accent hover:underline dark:text-accent-dark;
+  }
+  .project-title-highlight {
+    @apply inline-block rounded-md border border-accent/25 bg-gradient-to-r from-accent/12 via-accent/8 to-transparent px-3 py-1 text-accent shadow-[inset_3px_0_0_0_var(--color-accent)] dark:border-accent-dark/30 dark:from-accent-dark/18 dark:via-accent-dark/10 dark:to-transparent dark:text-accent-dark dark:shadow-[inset_3px_0_0_0_var(--color-accent-dark)];
+  }
+  .project-card-title {
+    @apply inline-flex items-center rounded bg-accent/10 px-2 py-0.5 text-base font-bold tracking-tight text-accent transition group-hover:bg-accent/18 dark:bg-accent-dark/15 dark:text-accent-dark dark:group-hover:bg-accent-dark/25;
+  }
+}

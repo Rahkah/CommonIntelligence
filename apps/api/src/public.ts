@@ -12,6 +12,7 @@ import {
 } from '@common-intelligence/shared';
 import { type App, type Ctx, field, fail, json, one, page, sql, statuses, unpack } from './core';
 import { maintainer } from './auth';
+import { challengeSlug, githubRepository, publishChallenge } from './challenge-write';
 import * as view from './selects';
 
 export const catalog = new Hono<App>();
@@ -35,7 +36,7 @@ catalog.get('/api/challenges', async (c) =>
       c,
       view.challenges,
       ['status'],
-      "CASE WHEN slug='grandmaster' THEN 0 WHEN status='Active' THEN 1 ELSE 2 END,name"
+      "CASE WHEN slug='grandmaster' THEN 0 WHEN status='Active' THEN 1 ELSE 2 END,CASE WHEN status='Active' THEN createdAt END DESC,name,slug"
     )
   )
 );
@@ -158,29 +159,26 @@ catalog.get('/api/badges/:file', async (c) => {
 });
 
 const text = z.object({ en: field(4000), zh: field(4000) }).strict();
-const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/);
 catalog.post('/api/challenges', async (c) => {
   await maintainer(c);
   const b = await json(
     c,
     z
       .object({
-        slug,
+        slug: challengeSlug,
         name: field(150),
         domain: text,
         summary: text,
         goal: text,
         verificationMethod: text,
         rules: z.array(text).min(1).max(20),
-        githubRepo: z.string().regex(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/),
+        githubRepo: githubRepository,
         trustedCheckName: field(150),
         targetDisplay: field(200),
         status: z.enum(['Active', 'Proposed']).default('Active'),
       })
       .strict()
   );
-  const [owner, repo] = new URL(b.githubRepo).pathname.slice(1).split('/'),
-    j = JSON.stringify;
   const record = {
     currentBestDisplay: 'Unrated',
     targetDisplay: b.targetDisplay,
@@ -189,28 +187,15 @@ catalog.post('/api/challenges', async (c) => {
     sourceUrl: b.githubRepo,
     sourceLabel: b.name,
   };
-  await sql(
-    c.env.DB,
-    `INSERT INTO challenges(id,slug,name,status,domain_json,tagline_json,summary_json,background_json,ultimate_goal_json,record_info_json,
-    record_history_json,rules_json,scoring_metric_json,verification_method_json,contribution_criteria_json,github_repo_owner,github_repo_name,trusted_workflow_name)
-    VALUES(?,?,?,?,?,?,?,?,?,?,'[]',?,?,?,'[]',?,?,?)`,
-    b.slug,
-    b.slug,
-    b.name,
-    b.status,
-    j(b.domain),
-    j(b.summary),
-    j(b.summary),
-    j(b.summary),
-    j(b.goal),
-    j(record),
-    j(b.rules),
-    j(b.goal),
-    j(b.verificationMethod),
-    owner,
-    repo,
-    b.trustedCheckName
-  ).run();
+  await c.env.DB.batch(publishChallenge(c.env.DB, {
+    ...b,
+    tagline: b.summary,
+    background: b.summary,
+    ultimateGoal: b.goal,
+    scoringMetric: b.goal,
+    contributionCriteria: [],
+    record,
+  }));
   return c.json(await challenge(c, b.slug), 201);
 });
 catalog.post('/api/challenges/:id/activate', async (c) => {
@@ -227,8 +212,8 @@ catalog.post('/api/challenges/:id/activate', async (c) => {
 catalog.get('/challenges/:slug/join.txt', async (c) => {
   const h = await challenge(c, c.req.param('slug'));
   if (h.status !== 'Active') fail(404, 'NOT_FOUND');
-  let preamble = `${h.name}\n${h.background.en}\nGoal: ${h.ultimateGoal.en}\nRepository: ${h.githubRepo}\nVerification: ${h.verificationMethod.en}\n${h.rules.map((x) => x.en).join('\n')}`;
-  if (['grandmaster', 'project-5904'].includes(h.slug)) {
+  let preamble = `${h.name}\n${h.background.en}\nGoal: ${h.ultimateGoal.en}\nRepository: ${h.githubRepo}\nScoring: ${h.scoringMetric.en}\nVerification: ${h.verificationMethod.en}\n${h.rules.map((x) => x.en).join('\n')}`;
+  if (h.slug === 'grandmaster') {
     const asset = await c.env.ASSETS.fetch(c.req.raw);
     if (asset.ok && asset.headers.get('content-type')?.includes('text/plain')) {
       preamble = (await asset.text())
@@ -241,7 +226,8 @@ catalog.get('/challenges/:slug/join.txt', async (c) => {
       `
 
 Agent workflow for ${h.id} at ${c.env.APP_ORIGIN}
-Use your operator's scoped Bearer token. Planning requires both tasks:claim and tasks:propose.
+Use the Bearer credential from your copied project prompt. Redeem its one-time code before registration.
+Planning requires both tasks:claim and tasks:propose.
 Register with POST /api/agents/register
 (label, selfReportedModel, selfReportedClient, challengeId). Read /api/knowledge?challengeId=${h.id}.
 GET /api/tasks?challengeId=${h.id}&status=Available then POST /api/tasks/claim with

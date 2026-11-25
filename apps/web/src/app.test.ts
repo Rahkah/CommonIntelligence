@@ -1,10 +1,12 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import App from './App.vue';
 import { routes } from './router';
-import SuperpermutationVerifier from './components/SuperpermutationVerifier.vue';
 import { useAppState } from './stores/appState';
+import { apiClient } from './api/client';
+import { DEMO_USERS } from './data/demoData';
+import type { ProjectProposal } from '@common-intelligence/shared';
 
 function createTestRouter(initialPath = '/') {
   const router = createRouter({
@@ -23,19 +25,126 @@ describe('Common Intelligence Frontend MVP', () => {
     state.user = null;
   });
 
-  it('renders streamlined HomePage with science-history hook, Grandmaster vs Stockfish 19, join prompt, login, and contributors', async () => {
+  it('submits a project for review and publishes it through the maintainer queue', async () => {
+    const { state } = useAppState();
+    const previousMode = state.dataMode;
+    const proposal: ProjectProposal = {
+      id: 'proposal_test', name: 'Open scheduling study', domain: 'Algorithms',
+      summary: 'Compare scheduling strategies.', goal: 'Reproduce a baseline.',
+      scoringMetric: 'Completed jobs', acceptanceCriteria: 'Publish reproducible results.',
+      authorUsername: 'author', status: 'Pending', submittedAt: '2026-11-25T00:00:00.000Z',
+      reviewedAt: null, rejectionReason: null, challengeSlug: null,
+    };
+    let result = proposal;
+    state.dataMode = 'api';
+    vi.spyOn(apiClient, 'getMe').mockResolvedValue({
+      mode: 'live', authenticated: true, user: DEMO_USERS[0]!, canReviewProjects: true,
+    });
+    const joinCode = 'ci_join_' + 'a'.repeat(64);
+    const join = vi.spyOn(apiClient, 'createAgentJoinCode').mockResolvedValue({
+      code: joinCode, expiresAt: '2026-11-25T00:05:00.000Z',
+    });
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    const submit = vi.spyOn(apiClient, 'createProjectProposal').mockResolvedValue(proposal);
+    vi.spyOn(apiClient, 'listProjectProposals').mockImplementation(async (_offset, status) => {
+      const items = !status || status === result.status ? [result] : [];
+      return { items, total: items.length, offset: 0, limit: 50 };
+    });
+    const publish = vi.spyOn(apiClient, 'approveProjectProposal').mockImplementation(async () => {
+      result = { ...proposal, status: 'Approved', challengeSlug: 'open-scheduling-study' };
+      return result;
+    });
+    try {
+      const router = createTestRouter('/');
+      await router.isReady();
+      const wrapper = mount(App, { global: { plugins: [router] } });
+      try {
+        await flushPromises();
+        expect(wrapper.get('a[href="/projects/new"]').text()).toBe('New project');
+        expect(wrapper.get('a[href="/admin/project-proposals"]').text()).toBe('Review projects');
+        const copyJoin = wrapper.findAll('button').find((button) => button.text() === 'Copy prompt and authorize agent');
+        expect(copyJoin).toBeDefined();
+        await copyJoin!.trigger('click');
+        await flushPromises();
+        expect(join).toHaveBeenCalledWith('grandmaster');
+        expect(copy).toHaveBeenCalledWith(expect.stringContaining(joinCode));
+        await router.push('/projects/new');
+        await flushPromises();
+        const [ideaForm, importForm] = wrapper.findAll('form');
+        const idea = 'Compare "earliest deadline first" with a pinned baseline.';
+        await ideaForm!.get('textarea').setValue(idea);
+        await ideaForm!.trigger('submit');
+        expect(ideaForm!.get('pre').text()).toContain(JSON.stringify(idea));
+        expect(ideaForm!.get('pre').text()).toContain('"schemaVersion": 1');
+        await ideaForm!.findAll('button').at(-1)!.trigger('click');
+        expect(copy).toHaveBeenCalledWith(expect.stringContaining(JSON.stringify(idea)));
+
+        const { name, domain, summary, goal, scoringMetric, acceptanceCriteria } = proposal;
+        const project = { name, domain, summary, goal, scoringMetric, acceptanceCriteria, githubRepo: null };
+        await importForm!.get('textarea').setValue(JSON.stringify({ schemaVersion: 2, ...project }));
+        await importForm!.trigger('submit');
+        expect(importForm!.get('[role="alert"]').text()).toContain('schemaVersion 1');
+        expect(submit).not.toHaveBeenCalled();
+        await importForm!.get('textarea').setValue(JSON.stringify({ schemaVersion: 1, ...project, acceptanceCriteria: '' }));
+        await importForm!.trigger('submit');
+        expect(importForm!.get('[role="alert"]').text()).toContain('acceptanceCriteria');
+        expect(submit).not.toHaveBeenCalled();
+        const brief = '```json\n' + JSON.stringify({ schemaVersion: 1, ...project }) + '\n```';
+        await importForm!.get('textarea').setValue(brief);
+        await importForm!.trigger('submit');
+        expect(wrapper.get('article').text()).toContain(acceptanceCriteria);
+        expect(submit).not.toHaveBeenCalled();
+        await wrapper.get('article button.project-button').trigger('click');
+        await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings/project-proposals'));
+        await flushPromises();
+        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 1, name: proposal.name }), expect.any(String));
+        expect(wrapper.text()).toContain('Pending review');
+
+        await router.push('/admin/project-proposals');
+        await flushPromises();
+        await wrapper.get('article button').trigger('click');
+        const review = wrapper.get('article form');
+        await review.get('input[type="url"]').setValue('https://github.com/example/schedules');
+        const reviewInputs = review.findAll('input:not([type])');
+        await reviewInputs[1]!.setValue('verify-schedule');
+        await reviewInputs[2]!.setValue('Reproduce baseline');
+        await review.get('textarea').setValue('Compare results in CI.');
+        await review.trigger('submit');
+        await flushPromises();
+        expect(publish).toHaveBeenCalledWith(proposal.id, expect.objectContaining({
+          slug: 'open-scheduling-study', trustedCheckName: 'verify-schedule',
+        }));
+        await router.push('/settings/project-proposals');
+        await flushPromises();
+        expect(wrapper.get('a[href="/challenges/open-scheduling-study"]').text()).toBe('View published project');
+      } finally {
+        wrapper.unmount();
+      }
+    } finally {
+      vi.restoreAllMocks();
+      state.dataMode = previousMode;
+      state.canReviewProjects = false;
+    }
+  });
+
+  it('renders streamlined HomePage with collaborative project hook, Grandmaster vs Stockfish 19, Open Game (64KB), Open Language, join prompt, login, and contributors', async () => {
     const router = createTestRouter('/');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
     const text = wrapper.text();
-    expect(text).toContain('Leave your name in science with your AI.');
+    expect(text).toContain('Build open projects together with your AI.');
     expect(text).toContain('Sign in with GitHub');
     expect(text).toContain('/challenges/grandmaster/join.txt');
     expect(text).toContain('Project Grandmaster');
     expect(text).toContain('Stockfish 19');
-    expect(text).toContain('Project 5904');
+    expect(text).toContain('Open Game');
+    expect(text).toContain('64 KB');
+    expect(text).toContain('Open Language');
+    expect(text).not.toContain('Project 5904');
+    expect(text).not.toContain('TinyMind');
+    expect(text).not.toContain('Infinite Tetris');
     expect(text).toContain('@elena-rostova-demo');
     expect(text).toContain('DEMO');
   });
@@ -51,8 +160,14 @@ describe('Common Intelligence Frontend MVP', () => {
     await langBtn!.trigger('click');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('让你的 AI，在科学史上留下你的名字。');
+    expect(wrapper.text()).toContain('让你的 AI，与全球 Agent 协同完成项目。');
     expect(wrapper.text()).toContain('公共挑战');
+    expect(wrapper.text()).toContain('最强象棋引擎计划');
+    expect(wrapper.text()).toContain('64KB 开放游戏计划');
+    expect(wrapper.text()).toContain('开放语言计划');
+    expect(wrapper.text()).not.toContain('5904 计划');
+    expect(wrapper.text()).toContain('进行中');
+    expect(wrapper.text()).toContain('筹备中');
     expect(wrapper.text()).toContain('有效贡献者');
   });
 
@@ -68,21 +183,6 @@ describe('Common Intelligence Frontend MVP', () => {
     const img = wrapper.find('img[alt*="Proof of Contribution Certificate"]');
     expect(img.exists()).toBe(true);
     expect(img.attributes('src')).toContain('data:image/svg+xml');
-  });
-
-  it('runs real client-side SuperpermutationVerifier for valid and broken candidates', async () => {
-    const wrapper = mount(SuperpermutationVerifier);
-    expect(wrapper.text()).toContain('VALID SUPERPERMUTATION');
-    expect(wrapper.text()).toContain('24 / 24');
-
-    const brokenBtn = wrapper
-      .findAll('button')
-      .find((b) => b.text().toLowerCase().includes('missing'));
-    expect(brokenBtn).toBeDefined();
-    await brokenBtn!.trigger('click');
-
-    expect(wrapper.text()).toContain('INVALID CANDIDATE');
-    expect(wrapper.text()).toContain('321');
   });
 
   it('supports demo GitHub sign-in and scoped Agent Token creation & revocation', async () => {
@@ -113,10 +213,11 @@ describe('Common Intelligence Frontend MVP', () => {
     expect(wrapper.text()).toContain('REVOKED');
   });
 
-  it('renders /challenges/grandmaster, /challenges/project-5904, /live, /contributors, /u/:username, and /docs cleanly', async () => {
+  it('renders /challenges/grandmaster, /challenges/open-game, /challenges/open-language, /live, /contributors, /u/:username, and /docs cleanly', async () => {
     const checks: Array<[string, string]> = [
-      ['/challenges/grandmaster', 'Stockfish 19'],
-      ['/challenges/project-5904', 'Andrei Teodorescu'],
+      ['/challenges/grandmaster', 'Active Agents'],
+      ['/challenges/open-game', '64 KB'],
+      ['/challenges/open-language', 'Open Language'],
       ['/live', 'Live Activity'],
       ['/contributors', 'Founding Contributor'],
       ['/u/elena-rostova-demo', 'GitHub Profile README Badge'],

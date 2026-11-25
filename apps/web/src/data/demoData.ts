@@ -10,6 +10,7 @@ import type {
   Task,
   UserProfileSummary,
 } from '@common-intelligence/shared';
+import { STARTER_ROADMAP_TASKS } from './starterTasks.ts';
 
 function makeMonogramAvatar(initials: string, bg: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" rx="16" fill="${bg}"/><text x="40" y="42" dy="0.34em" text-anchor="middle" font-family="Inter,system-ui,sans-serif" font-size="28" font-weight="600" fill="#FAFAF8">${initials}</text></svg>`;
@@ -101,12 +102,12 @@ export const DEMO_USERS: UserProfileSummary[] = [
     profileUrl: 'https://github.com/elena-rostova-demo',
     joinedAt: '2026-10-14T09:15:00Z',
     bio: {
-      en: 'Search pruning, NNUE SIMD kernels, and combinatorial SAT solvers. Running local Claude Code + Rust harnesses.',
-      zh: '关注国际象棋搜索剪枝、NNUE SIMD 核与组合 SAT 求解，使用本地 Claude Code 与 Rust 工具链参与研究。',
+      en: 'Search pruning, NNUE SIMD kernels, and clean-room engine verification. Running local Claude Code + Rust harnesses.',
+      zh: '关注国际象棋搜索剪枝、NNUE SIMD 核与洁净室引擎验证，使用本地 Claude Code 与 Rust 工具链参与研究。',
     },
-    verifiedContributionsCount: 4,
+    verifiedContributionsCount: 1,
     badgesCount: 3,
-    challengesJoined: ['grandmaster', 'project-5904'],
+    challengesJoined: ['grandmaster'],
     isDemo: true,
   },
   {
@@ -120,9 +121,9 @@ export const DEMO_USERS: UserProfileSummary[] = [
       en: 'SPRT match auditing, tactical horizon counterexamples, and clean-room verification harnesses.',
       zh: '专注于 SPRT 对弈复核、战术地平线反例与洁净室验证基准。',
     },
-    verifiedContributionsCount: 3,
+    verifiedContributionsCount: 1,
     badgesCount: 3,
-    challengesJoined: ['grandmaster', 'project-5904'],
+    challengesJoined: ['grandmaster'],
     isDemo: true,
   },
   {
@@ -136,9 +137,9 @@ export const DEMO_USERS: UserProfileSummary[] = [
       en: 'Quantized NNUE accumulator architectures, LMR tuning, and provable pruning bounds.',
       zh: '研究量化 NNUE 累加器架构、LMR 缩减调优与严格剪枝下界。',
     },
-    verifiedContributionsCount: 3,
+    verifiedContributionsCount: 2,
     badgesCount: 3,
-    challengesJoined: ['grandmaster', 'project-5904'],
+    challengesJoined: ['grandmaster'],
     isDemo: true,
   },
   {
@@ -152,9 +153,9 @@ export const DEMO_USERS: UserProfileSummary[] = [
       en: 'Documenting reproducible dead ends and Elo-losing search heuristics so agents never repeat them.',
       zh: '记录可复现的失败路径与掉分启发式，避免全球 Agent 重复踩坑。',
     },
-    verifiedContributionsCount: 2,
+    verifiedContributionsCount: 1,
     badgesCount: 2,
-    challengesJoined: ['grandmaster', 'project-5904'],
+    challengesJoined: ['grandmaster'],
     isDemo: true,
   },
 ];
@@ -177,7 +178,7 @@ export const DEMO_CHALLENGES: Challenge[] = [
     },
     background: {
       en: 'Stockfish 19 (released September 5, 2026 with the SFNNv16 NNUE architecture) remains the undisputed pinnacle of computer chess at ~3,650+ Elo on CCRL 40/15 and 19 TCEC titles. Historically, pushing computer chess forward required years of tightly knit human tuning. Project Grandmaster asks a bold open-science question: can thousands of independent programmers’ AI agents inherit each other’s verified search improvements, NNUE architectures, and refuted dead ends—and collectively climb past the strongest chess engine on Earth?',
-      zh: '2026 年 9 月 5 日发布的 Stockfish 19（搭载 SFNNv16 NNUE 架构）在 CCRL 40/15 榜单达到约 3,650+ Elo，并手握 19 座 TCEC 冠军奖杯，是当今计算机国际象棋无可争议的巅峰。Project Grandmaster 提出一项激动人心的开放科学实验：全球数千名程序员各自的 AI Agent 能否共享经过客观对弈验证的搜索算法、评估网络与反例档案，从零协作攀登并正面击败当今世界最强引擎？',
+      zh: '2026 年 9 月 5 日发布的 Stockfish 19（搭载 SFNNv16 NNUE 架构）在 CCRL 40/15 榜单达到约 3,650+ Elo，并手握 19 座 TCEC 冠军奖杯，是当今计算机国际象棋无可争议的巅峰。最强象棋引擎计划提出一项激动人心的开放科学实验：全球数千名程序员各自的 AI Agent 能否共享经过客观对弈验证的搜索算法、评估网络与反例档案，从零协作攀登并正面击败当今世界最强引擎？',
     },
     ultimateGoal: {
       en: 'Achieve a statistically verified winning match score (> 50.0%, positive Elo diff under SPRT) against Stockfish 19 across a 10,000-game fixed-opening gauntlet on equal hardware and time controls—using strictly clean-room code and openly trained weights.',
@@ -341,340 +342,33 @@ export const DEMO_CHALLENGES: Challenge[] = [
     joinInstructionsPath: '/challenges/grandmaster/join.txt',
     stats: {
       contributorsCount: 4,
-      verifiedContributionsCount: 4,
-      openTasksCount: 4,
+      verifiedContributionsCount: 5,
+      openTasksCount:
+        4 +
+        STARTER_ROADMAP_TASKS.filter(
+          (t) => t.challengeId === 'grandmaster' && t.status === 'Available'
+        ).length,
       activeLeasesCount: 2,
       completedTasksCount: 4,
     },
     isDemoStats: true,
   },
 
-  // Active Combinatorics Challenge: Project 5904 (preserved in full with real verifier)
-  {
-    id: 'project-5904',
-    slug: 'project-5904',
-    name: 'Project 5904',
-    tagline: {
-      en: 'Break the shortest known 7-symbol superpermutation record (≤ 5,904).',
-      zh: '突破七符号超级排列最短公开纪录（目标 ≤ 5,904）。',
-    },
-    domain: { en: 'Combinatorics & Algorithmic Search', zh: '组合数学与算法搜索' },
-    status: 'Active',
-    summary: {
-      en: 'A minimal superpermutation on n = 7 symbols must contain all 7! = 5,040 permutations as contiguous substrings. The published record reached 5,905 on August 17, 2026 (Andrei Teodorescu), leaving a 21-character gap above the proven theoretical lower bound of 5,884.',
-      zh: 'n = 7 符号的超级排列必须在连续子串中包含全部 7! = 5,040 个排列。2026 年 8 月 17 日 Andrei Teodorescu 将公开纪录推进至 5,905，距离已证明理论下界 5,884 仍有 21 个字符的探索空间。',
-    },
-    background: {
-      en: 'Superpermutations sit at the intersection of combinatorics, asymmetric Traveling Salesman formulations on Cayley graphs, and kernel decomposition theory. After Greg Egan (5,908 in 2018), Bogdan Coanda (5,907 in Feb 2019), and Greg Egan & Robin Houston (5,906 in Feb 2019), Andrei Teodorescu lowered the upper bound to 5,905 in August 2026. Rather than brute-forcing blindly, Project 5904 coordinates distributed AI coding agents to share verified kernel families, provable pruning rules, search-space certificates, and documented dead ends.',
-      zh: '超级排列问题横跨组合数学、Cayley 图上的非对称旅行商问题与核分解理论。继 2018 年 Greg Egan（5,908）、2019 年 2 月 Bogdan Coanda（5,907）与 Greg Egan / Robin Houston（5,906）之后，Andrei Teodorescu 于 2026 年 8 月将公开上界降至 5,905。Project 5904 通过分布式 AI Agent 共享经核验的核结构、剪枝定理、可验证搜索区域与失败经验，协同向 ≤ 5,904 推进。',
-    },
-    ultimateGoal: {
-      en: 'Discover and independently verify a valid 7-symbol superpermutation over {1,2,3,4,5,6,7} of length ≤ 5,904, or prove a tighter general lower bound above 5,884.',
-      zh: '发现并通过独立验证器确认一个长度 ≤ 5,904 的 7 符号合法超级排列，或给出严格高于 5,884 的新理论下界证明。',
-    },
-    record: {
-      currentBestDisplay: '5,905',
-      currentBestValue: 5905,
-      targetDisplay: '≤ 5,904',
-      targetValue: 5904,
-      lowerBoundDisplay: '5,884',
-      lowerBoundValue: 5884,
-      scoreDirection: 'lower',
-      scoreUnit: 'chars',
-      scaleStartValue: 5913,
-      attribution: 'Andrei Teodorescu (Aug 17, 2026)',
-      recordedAt: '2026-08-17',
-      sourceUrl: 'https://oeis.org/A180632',
-      sourceLabel: 'OEIS A180632 / Published Literature',
-    },
-    recordHistory: [
-      {
-        date: '1993-01-01',
-        score: 5913,
-        label: 'Classical Recursive Bound',
-        attribution: 'OEIS A007489 (Σ k!)',
-        sourceUrl: 'https://oeis.org/A007489',
-        note: {
-          en: 'Standard recursive construction length 7! + 6! + 5! + 4! + 3! + 2! + 1! = 5,913.',
-          zh: '经典递归构造长度 7! + 6! + 5! + 4! + 3! + 2! + 1! = 5,913。',
-        },
-      },
-      {
-        date: '2018-10-20',
-        score: 5908,
-        label: 'Egan Construction',
-        attribution: 'Greg Egan',
-        sourceUrl: 'https://oeis.org/A180632',
-        note: {
-          en: 'Generalized Cayley-graph construction adapting Aaron Williams’s Hamiltonian path framework.',
-          zh: '基于 Aaron Williams 的 Cayley 图框架推广构造。',
-        },
-      },
-      {
-        date: '2019-02-01',
-        score: 5907,
-        label: 'Coanda Kernel Search',
-        attribution: 'Bogdan Coanda',
-        sourceUrl: 'https://oeis.org/A180632',
-        note: {
-          en: 'Improved theoretical kernel search over 2-cycle & 3-cycle transitions.',
-          zh: '改进核结构计算机搜索策略后降至 5,907。',
-        },
-      },
-      {
-        date: '2019-02-27',
-        score: 5906,
-        label: 'Houston–Egan Refinement',
-        attribution: 'Greg Egan & Robin Houston',
-        sourceUrl: 'https://oeis.org/A180632',
-        note: {
-          en: 'Modified kernel search shaving 1 additional symbol; stood for over seven years.',
-          zh: '结合 Robin Houston 思路改进搜索，将纪录保持至 5,906 逾七年。',
-        },
-      },
-      {
-        date: '2026-08-17',
-        score: 5905,
-        label: 'Teodorescu Breakthrough',
-        attribution: 'Andrei Teodorescu',
-        sourceUrl: 'https://oeis.org/A180632',
-        note: {
-          en: 'Latest verified published upper bound for n = 7 superpermutations.',
-          zh: '目前最新公开核实的 n = 7 最短超级排列上界。',
-        },
-        isCurrentRecord: true,
-      },
-    ],
-    rules: [
-      {
-        en: 'Candidate strings for n = 7 may contain ONLY the ASCII symbols 1, 2, 3, 4, 5, 6, 7 (whitespace stripped prior to verification).',
-        zh: 'n = 7 候选字符串仅允许包含 ASCII 符号 1、2、3、4、5、6、7（验证前剥离空白符）。',
-      },
-      {
-        en: 'Every one of the 7! = 5,040 permutations must appear at least once as a contiguous 7-character substring.',
-        zh: '全部 7! = 5,040 个排列均须作为连续 7 字符子串至少出现一次。',
-      },
-      {
-        en: 'Never submit solver timeouts, incomplete DFS logs, or agent self-reports as proof that a search region contains no solution.',
-        zh: '禁止将求解器超时、未完成的搜索或 Agent 自报日志当作某搜索空间不存在解的证明。',
-      },
-      {
-        en: 'Contributions that cannot be objectively auto-verified enter formal maintainer peer review.',
-        zh: '无法完全客观自动验证的成果必须进入维护者人工审核流程。',
-      },
-      {
-        en: 'All formal submissions must arrive as GitHub Pull Requests authored by the contributor’s bound GitHub account and cite parent contributions.',
-        zh: '所有正式成果须由绑定 GitHub 账号提交 Pull Request，并清晰标注所依赖的前置成果。',
-      },
-    ],
-    scoringMetric: {
-      en: 'Primary: exact string length L for valid n = 7 superpermutations (lower is better; strictly < 5,905 breaks record). Secondary: verified search speedup, independently checkable exhaustion certificates, or proven lower-bound tightening.',
-      zh: '主指标：合法 n = 7 超级排列的精确长度 L（越短越优，严格小于 5,905 即破纪录）。次指标：可复现搜索加速比、可独立校验的搜索空间耗尽证书或下界提升证明。',
-    },
-    verificationMethod: {
-      en: 'Independent, isolated GitHub Actions verifier (superperm-verifier-v1.0.0) running with zero secrets and no network access on untrusted PR artifacts, plus maintainer audit for theoretical proofs.',
-      zh: '独立隔离的 GitHub Actions 验证器（superperm-verifier-v1.0.0），在无 Secret、无网络访问的最小权限沙箱中校验候选文件；理论证明由维护者复核。',
-    },
-    contributionCriteria: [
-      {
-        type: 'RecordImprovement',
-        label: { en: 'Record Improvement', zh: '新纪录突破' },
-        verificationMode: 'Automated',
-        criteria: {
-          en: 'Passes superperm-verifier-v1.0.0 with n=7, 5040/5040 permutations present, and length < 5,905.',
-          zh: '通过 superperm-verifier-v1.0.0 校验：n=7 全部 5040 个排列完整出现，且长度严格小于 5,905。',
-        },
-      },
-      {
-        type: 'PruningStrategy',
-        label: { en: 'Pruning Strategy', zh: '有效剪枝策略' },
-        verificationMode: 'Automated + Maintainer',
-        criteria: {
-          en: 'Soundness argument proving no valid ≤ 5,904 solution is discarded, verified against known 5,906/5,905 structures.',
-          zh: '给出不丢解的正确性论证，并在已知 5,906/5,905 构造上通过回归验证。',
-        },
-      },
-      {
-        type: 'VerifiedSearchRegion',
-        label: { en: 'Verified Search Region', zh: '可验证搜索区域' },
-        verificationMode: 'Automated + Maintainer',
-        criteria: {
-          en: 'Includes an independently replayable UNSAT/DRAT or exhaustive partition certificate — timeouts are strictly rejected.',
-          zh: '附带可独立重放校验的 UNSAT/DRAT 或穷举分区证书；严禁以超时结果充当证明。',
-        },
-      },
-      {
-        type: 'Counterexample',
-        label: { en: 'Counterexample', zh: '反例发现' },
-        verificationMode: 'Automated',
-        criteria: {
-          en: 'Concrete reproducible witness refuting an existing conjecture, heuristic bound, or unverified claim.',
-          zh: '提供可复现具体反例，推翻现有猜想、启发式假设或未核实结论。',
-        },
-      },
-    ],
-    githubRepo: 'https://github.com/common-intelligence/project-5904',
-    joinInstructionsPath: '/challenges/project-5904/join.txt',
-    stats: {
-      contributorsCount: 4,
-      verifiedContributionsCount: 5,
-      openTasksCount: 4,
-      activeLeasesCount: 2,
-      completedTasksCount: 3,
-    },
-    isDemoStats: true,
-  },
-
-  // 11 Proposed Candidate Challenges (Section 4)
+  // Proposed Candidate Challenges: 64KB Open Game & Open Language
   ...[
-    {
-      slug: 'tinymind',
-      name: 'TinyMind',
-      domain: { en: 'Game Playing & Code Golf', zh: '博弈引擎与极限压缩' },
-      tagline: {
-        en: 'Create the strongest possible chess engine fitting strictly within 4 KB.',
-        zh: '创造严格限定 4KB 体积内的最强国际象棋引擎。',
-      },
-      targetDisplay: '> 2400 Elo @ ≤ 4,096 B',
-      currentBestDisplay: 'Proposed (Benchmark TBD)',
-      metric: {
-        en: 'Fixed-time tournament Elo against pinned reference suite with binary/source strictly ≤ 4,096 bytes.',
-        zh: '在 ≤ 4,096 字节严格限制下，与固定参考引擎对战的锦标赛 Elo 评分。',
-      },
-    },
-    {
-      slug: 'project-shrink',
-      name: 'Project Shrink',
-      domain: { en: 'Information Theory & Compression', zh: '信息论与无损压缩' },
-      tagline: {
-        en: 'Push the limits of lossless data compression on an open, reproducible benchmark corpus.',
-        zh: '在公开可复现基准语料上挑战无损数据压缩极限。',
-      },
-      targetDisplay: 'Lowest total (compressed + decompressor) bytes',
-      currentBestDisplay: 'Proposed (Corpus TBD)',
-      metric: {
-        en: 'Exact byte count of compressed payload plus standalone deterministic decompressor, verified by SHA-256 round-trip match.',
-        zh: '压缩产物与独立解压器总字节数，经 SHA-256 无损还原校验。',
-      },
-    },
-    {
-      slug: 'infinite-tetris',
-      name: 'Infinite Tetris',
-      domain: { en: 'Control & Evolutionary AI', zh: '控制策略与进化算法' },
-      tagline: {
-        en: 'Collaboratively evolve deterministic policies for long-horizon Tetris survival and line clearing.',
-        zh: '协同进化俄罗斯方块长周期生存与消行 AI 策略。',
-      },
-      targetDisplay: 'Max median lines cleared across seeded bag trials',
-      currentBestDisplay: 'Proposed (Harness TBD)',
-      metric: {
-        en: 'Median cleared lines across 100 pinned deterministic 7-bag random seeds under fixed decision latency budget.',
-        zh: '在固定随机种子与步时限制下的 100 局中位消行数。',
-      },
-    },
-    {
-      slug: 'sort-limit',
-      name: 'Sort Limit',
-      domain: { en: 'Circuit Complexity & Combinatorics', zh: '比较网络与组合优化' },
-      tagline: {
-        en: 'Discover smaller-size or shallower-depth sorting networks for open input widths n ≥ 13.',
-        zh: '为开放规模（n ≥ 13）寻找比较器更少或深度更浅的排序网络。',
-      },
-      targetDisplay: 'Beat best known comparator count / depth',
-      currentBestDisplay: 'Proposed (Zero-One Verifier TBD)',
-      metric: {
-        en: 'Verified via the Zero-One Principle across all 2^n binary inputs; scored by comparator count and parallel depth.',
-        zh: '通过 0-1 原理对全部 2^n 二进制输入完备校验，以比较器数量和并行深度评分。',
-      },
-    },
-    {
-      slug: 'matrix-frontier',
-      name: 'Matrix Frontier',
-      domain: { en: 'Algebraic Complexity', zh: '代数复杂度与张量分解' },
-      tagline: {
-        en: 'Reduce bilinear multiplication rank for small matrix multiplication tensors.',
-        zh: '减少小规模矩阵乘法张量所需的双线性乘法运算次数。',
-      },
-      targetDisplay: 'Lower exact tensor rank R(m, n, p)',
-      currentBestDisplay: 'Proposed (Symbolic Verifier TBD)',
-      metric: {
-        en: 'Exact symbolic verification over Q / Z_2 of factor matrices U, V, W reproducing the matrix product tensor.',
-        zh: '在有理数域或有限域上对因子张量 U、V、W 进行精确符号恒等验证。',
-      },
-    },
     {
       slug: 'open-game',
       name: 'Open Game',
-      domain: { en: 'Collaborative Software Engineering', zh: '分布式开源软件协作' },
+      domain: { en: '64KB Game Engineering & Collaboration', zh: '64KB 极限体量游戏共创' },
       tagline: {
-        en: 'Coordinate distributed AI agents to design, build, and test a complete open-source game.',
-        zh: '全球 Agent 协同设计、开发并测试一款完整开源游戏。',
+        en: 'Coordinate distributed AI agents to design, build, and polish a complete playable game within 64 KB.',
+        zh: '全球 Agent 协同设计、开发并打磨一款总包体严格不超过 64KB 的完整可玩开源游戏。',
       },
-      targetDisplay: 'Playable deterministic milestone releases',
+      targetDisplay: 'Playable complete game ≤ 64 KB (65,536 B)',
       currentBestDisplay: 'Proposed',
       metric: {
-        en: 'Passing automated build, deterministic replay tests, asset licensing audit, and maintainer gameplay review.',
-        zh: '自动化构建、确定性回放测试、开源协议合规检查与维护者评审。',
-      },
-    },
-    {
-      slug: 'bug-hunt',
-      name: 'Bug Hunt',
-      domain: { en: 'Program Verification & Fuzzing', zh: '程序验证与缺陷挖掘' },
-      tagline: {
-        en: 'Collaboratively discover reproducible, responsibly disclosed bugs in critical open-source software.',
-        zh: '协同发现关键开源基础设施中可复现的真实 Bug 并负责任披露。',
-      },
-      targetDisplay: 'Minimal reproducible test cases + upstream fixes',
-      currentBestDisplay: 'Proposed',
-      metric: {
-        en: 'Verified minimal reproducer and confirmed upstream issue/patch; strictly follows coordinated disclosure.',
-        zh: '经上游确认的最小复现用例与修复补丁，严格遵守负责任披露规范。',
-      },
-    },
-    {
-      slug: 'route-frontier',
-      name: 'Route Frontier',
-      domain: { en: 'Graph Algorithms', zh: '图论与路径规划' },
-      tagline: {
-        en: 'Optimize exact and bounded-suboptimal pathfinding heuristics on large weighted road & grid graphs.',
-        zh: '在大规模加权图与网格地图上优化精确及有界次优寻路算法。',
-      },
-      targetDisplay: 'Pareto frontier of query latency vs. preprocessing size',
-      currentBestDisplay: 'Proposed',
-      metric: {
-        en: 'Exact path optimality verified against Dijkstra oracle plus reproducible query/memory benchmarks.',
-        zh: '以 Dijkstra 基准校验路径精确最优性，并度量查询延迟与预处理索引大小。',
-      },
-    },
-    {
-      slug: 'pack-better',
-      name: 'Pack Better',
-      domain: { en: 'Online Algorithms', zh: '在线算法与装箱优化' },
-      tagline: {
-        en: 'Improve competitive ratios and practical heuristics for online bin packing.',
-        zh: '改进在线装箱问题的竞争比及实用启发式策略。',
-      },
-      targetDisplay: 'Lower asymptotic competitive ratio & adversarial worst-case',
-      currentBestDisplay: 'Proposed',
-      metric: {
-        en: 'Formal LP/weight-function upper bound proof or verified adversarial lower-bound sequence.',
-        zh: '基于线性规划或权函数的竞争比上界证明，或经核验的对抗下界序列。',
-      },
-    },
-    {
-      slug: 'traveling-salesman',
-      name: 'Traveling Salesman',
-      domain: { en: 'Combinatorial Optimization', zh: '组合优化' },
-      tagline: {
-        en: 'Advance open heuristics and cutting-plane techniques on large TSPLIB & synthetic instances.',
-        zh: '在公开 TSPLIB 及大规模合成实例上推进旅行商求解算法与割平面技术。',
-      },
-      targetDisplay: 'Tighter tour length & dual gap on open benchmark instances',
-      currentBestDisplay: 'Proposed',
-      metric: {
-        en: 'Exact integer tour verification (valid Hamiltonian cycle) and exact objective length check.',
-        zh: '哈密顿回路合法性校验与精确路径长度核验。',
+        en: 'Strict <= 65,536-byte compressed package ceiling, deterministic replay tests, asset licensing audit, and playable milestone review.',
+        zh: '严格 <= 65,536 字节（64KB）总包体门禁、确定性回放测试、开源协议合规与可玩里程碑评审。',
       },
     },
     {
@@ -736,7 +430,9 @@ export const DEMO_CHALLENGES: Challenge[] = [
       stats: {
         contributorsCount: 0,
         verifiedContributionsCount: 0,
-        openTasksCount: 0,
+        openTasksCount: STARTER_ROADMAP_TASKS.filter(
+          (t) => t.challengeId === c.slug && t.status === 'Available'
+        ).length,
         activeLeasesCount: 0,
         completedTasksCount: 0,
       },
@@ -746,7 +442,9 @@ export const DEMO_CHALLENGES: Challenge[] = [
 ];
 
 export const DEMO_TASKS: Task[] = [
-  // --- Project Grandmaster (Chess Engine) Tasks ---
+  ...STARTER_ROADMAP_TASKS,
+
+  // --- Project Grandmaster (Chess Engine) Demo Tasks ---
   {
     taskId: 'TASK-GM-001',
     challengeId: 'grandmaster',
@@ -993,78 +691,6 @@ export const DEMO_TASKS: Task[] = [
     updatedAt: '2026-11-25T10:20:00Z',
     isDemo: true,
   },
-
-  // --- Project 5904 (Superpermutation) Tasks ---
-  {
-    taskId: 'TASK-5904-001',
-    challengeId: 'project-5904',
-    title: {
-      en: 'Reproduce and decompose the 5,905 Teodorescu construction into weight-1/2/3 cycle kernels',
-      zh: '复现并将 5,905 Teodorescu 构造分解为权 1/2/3 环核结构',
-    },
-    description: {
-      en: 'Parse the published 5,905-symbol superpermutation, independently confirm all 5,040 permutations, and export its exact kernel transition sequence as a machine-readable JSON artifact for downstream pruning tasks.',
-      zh: '解析已公开的 5,905 字符超级排列，独立校验全部 5,040 个排列，并将其精确核转换序列导出为机器可读 JSON 产物，供后续剪枝任务继承。',
-    },
-    taskType: 'Verification',
-    priority: 'Critical',
-    status: 'Accepted',
-    dependencies: [],
-    requiredCapabilities: ['python-or-rust', 'combinatorics'],
-    acceptanceCriteria: [
-      {
-        en: 'Independent script confirms 5,040/5,040 permutations and exact length 5,905.',
-        zh: '独立脚本确认 5,040/5,040 个排列完整且精确长度为 5,905。',
-      },
-    ],
-    inputArtifacts: ['ref:oeis-a180632-5905'],
-    outputRequirements: {
-      en: 'PR adding `artifacts/decompositions/teodorescu-5905.json` and deterministic verification script.',
-      zh: '提交包含 `artifacts/decompositions/teodorescu-5905.json` 与确定性校验脚本的 PR。',
-    },
-    assignedAgentId: 'agt-demo-01',
-    assignedAgentLabel: 'rust-kernel-explorer',
-    assignedAgentModelSelfReported: 'claude-sonnet-4.5',
-    assignedUserUsername: 'elena-rostova-demo',
-    leaseExpiresAt: null,
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/4',
-    createdAt: '2026-10-16T08:00:00Z',
-    updatedAt: '2026-10-18T11:30:00Z',
-    isDemo: true,
-  },
-  {
-    taskId: 'TASK-5904-005',
-    challengeId: 'project-5904',
-    title: {
-      en: 'Search asymmetric kernel partition K-15 (weight-2 deficit ≤ 18)',
-      zh: '搜索非对称核分区 K-15（权-2 缺口 ≤ 18）',
-    },
-    description: {
-      en: 'Independent partition exploring asymmetric 3-cycle bridges derived from the Teodorescu 5,905 kernel decomposition.',
-      zh: '探索源自 Teodorescu 5,905 核分解的非对称 3-环桥接独立分区。',
-    },
-    taskType: 'Search',
-    priority: 'Critical',
-    status: 'Available',
-    dependencies: ['TASK-5904-001'],
-    requiredCapabilities: ['sat-solver', 'rust-or-cpp'],
-    acceptanceCriteria: [
-      {
-        en: 'Valid candidate string of length ≤ 5,904 OR independently checkable UNSAT certificate.',
-        zh: '长度 ≤ 5,904 的合法候选解，或可独立重放的 UNSAT 耗尽证书。',
-      },
-    ],
-    inputArtifacts: ['contrib-5904-001'],
-    outputRequirements: {
-      en: 'Reproducible PR following the Project 5904 template.',
-      zh: '遵循 Project 5904 模板的可复现 PR。',
-    },
-    assignedAgentId: null,
-    leaseExpiresAt: null,
-    createdAt: '2026-11-14T11:00:00Z',
-    updatedAt: '2026-11-14T11:00:00Z',
-    isDemo: true,
-  },
 ];
 
 export const DEMO_CONTRIBUTIONS: Contribution[] = [
@@ -1201,72 +827,37 @@ export const DEMO_CONTRIBUTIONS: Contribution[] = [
     acceptedAt: '2026-11-24T14:20:00Z',
     isDemo: true,
   },
-
-  // --- Project 5904 Contributions (preserved) ---
   {
-    id: 'contrib-5904-001',
-    challengeId: 'project-5904',
-    challengeSlug: 'project-5904',
-    challengeName: 'Project 5904',
-    taskId: 'TASK-5904-001',
+    id: 'contrib-gm-005',
+    challengeId: 'grandmaster',
+    challengeSlug: 'grandmaster',
+    challengeName: 'Project Grandmaster',
+    taskId: 'TASK-GM-001',
     title: {
-      en: 'Canonical kernel decomposition & independent verification of the 5,905 record',
-      zh: '5,905 纪录的规范核分解与独立验证脚本',
-    },
-    contributionType: 'IndependentVerification',
-    summary: {
-      en: 'Independently verified the 5,905-character Teodorescu superpermutation and extracted its canonical weight-1/2/3 transition graph for reuse by downstream search tasks.',
-      zh: '独立验证了 5,905 字符的 Teodorescu 超级排列，并提取出标准权-1/2/3 转移图供下游任务复用。',
-    },
-    status: 'Reproduced',
-    contributorGithubId: '10482911',
-    contributorUsername: 'elena-rostova-demo',
-    contributorAvatarUrl: DEMO_USERS[0]!.avatarUrl,
-    selfReportedAgentModel: 'claude-sonnet-4.5',
-    prNumber: 4,
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/4',
-    commitSha: '9f4a21c8e7b03a14d8e2c5f9b013478a6c11e204',
-    verifierVersion: 'superperm-verifier-v1.0.0',
-    verificationSummary: {
-      en: '5,040/5,040 permutations confirmed; lossless round-trip decomposition reproduced by 2 independent contributors.',
-      zh: '确认 5,040/5,040 排列完整；无损分解已由 2 名独立贡献者复现。',
-    },
-    parentContributionIds: [],
-    credentialId: 'ci-cred-5904-0001',
-    acceptedAt: '2026-10-18T11:30:00Z',
-    isDemo: true,
-  },
-  {
-    id: 'contrib-5904-002',
-    challengeId: 'project-5904',
-    challengeSlug: 'project-5904',
-    challengeName: 'Project 5904',
-    taskId: 'TASK-5904-001',
-    title: {
-      en: 'Documented dead end: pure 2-opt local swaps plateau at 5,911 across 200 seeds',
-      zh: '失败经验归档：纯 2-opt 局部交换在 200 组随机种子下均止步于 5,911',
+      en: 'Documented dead end: pure CPU MCTS / PUCT loses -410 Elo vs alpha-beta + NNUE',
+      zh: '失败经验归档：同等 CPU 时限下纯 MCTS / PUCT 相对 Alpha-Beta + NNUE 落后 410 Elo',
     },
     contributionType: 'FailedApproach',
     summary: {
-      en: 'Reproducible negative benchmark showing unconstrained 2-opt string swaps cannot cross 5,911 on n = 7 without kernel-level cycle reorganization.',
-      zh: '可复现负面基准实验表明，缺乏核级环重组的无约束 2-opt 交换在 n = 7 上难以突破 5,911。',
+      en: 'Reproducible 500-game CPU benchmark confirming shallow PUCT rollouts miss deep tactical refutations against Stockfish 19 without dedicated GPU batching.',
+      zh: '500 局可复现 CPU 基准实验确认，在缺乏 GPU 批处理支撑下，浅层 PUCT 面对 Stockfish 19 频频漏算深层战术反击。',
     },
     status: 'Verified',
     contributorGithubId: '49012734',
     contributorUsername: 'mateo-silva-demo',
     contributorAvatarUrl: DEMO_USERS[3]!.avatarUrl,
     selfReportedAgentModel: 'local-qwen-2.5-coder-32b',
-    prNumber: 17,
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/17',
-    commitSha: 'b307d449a120f8e56c29d01f44e8b7a2c6190f3e',
-    verifierVersion: 'superperm-verifier-v1.0.0',
+    prNumber: 19,
+    prUrl: 'https://github.com/common-intelligence/grandmaster/pull/19',
+    commitSha: 'f019a28c74b6e35190d2a8c4e7b1f639a204d8e5',
+    verifierVersion: 'fastchess-sprt-v1.0.0',
     verificationSummary: {
-      en: 'Benchmark harness reproduced deterministically; added to Dead Ends index.',
-      zh: '基准脚本确定性复现通过，已收录至失败经验索引。',
+      en: '500-game equal-CPU benchmark reproduced deterministically; archived to Dead Ends index.',
+      zh: '500 局同算力基准确定性复现通过，已收录至失败经验索引。',
     },
-    parentContributionIds: ['contrib-5904-001'],
-    credentialId: 'ci-cred-5904-0005',
-    acceptedAt: '2026-11-16T21:10:00Z',
+    parentContributionIds: ['contrib-gm-001'],
+    credentialId: 'ci-cred-gm-0005',
+    acceptedAt: '2026-11-11T16:00:00Z',
     isDemo: true,
   },
 ];
@@ -1413,64 +1004,6 @@ export const DEMO_KNOWLEDGE: ResearchArtifact[] = [
     createdAt: '2026-11-25T08:10:00Z',
     isDemo: true,
   },
-
-  // --- Project 5904 Knowledge (preserved) ---
-  {
-    id: 'art-5904-001',
-    challengeId: 'project-5904',
-    title: {
-      en: 'Canonical 5,905 Teodorescu kernel decomposition',
-      zh: '5,905 Teodorescu 规范核分解图谱',
-    },
-    kind: 'Experiment',
-    status: 'Reproduced',
-    summary: {
-      en: 'Exact decomposition of the published 5,905 superpermutation into weight-1, weight-2, and weight-3 Cayley transitions with lossless reconstruction.',
-      zh: '将公开的 5,905 超级排列精确分解为权-1/2/3 Cayley 转移序列，支持无损重构。',
-    },
-    methodNotes: {
-      en: 'Deterministic linear scan indexing every 7-window by Lehmer rank.',
-      zh: '线性扫描对全部 7 字符窗口做 Lehmer 排名并提取转移步长。',
-    },
-    authorGithubId: '10482911',
-    authorUsername: 'elena-rostova-demo',
-    selfReportedAgentModel: 'claude-sonnet-4.5',
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/4',
-    commitSha: '9f4a21c8e7b03a14d8e2c5f9b013478a6c11e204',
-    verifierVersion: 'superperm-verifier-v1.0.0',
-    parentArtifactIds: [],
-    taskId: 'TASK-5904-001',
-    createdAt: '2026-10-18T11:30:00Z',
-    isDemo: true,
-  },
-  {
-    id: 'art-5904-004',
-    challengeId: 'project-5904',
-    title: {
-      en: 'Failed Approach: Unconstrained 2-opt / 3-opt simulated annealing on raw strings',
-      zh: '失败路径：直接对原始字符串做无约束 2-opt / 3-opt 模拟退火',
-    },
-    kind: 'FailedApproach',
-    status: 'Refuted',
-    summary: {
-      en: 'Across 200 seeded runs, raw-string annealing plateaus at 5,911–5,913 because local swaps shatter intact 6-symbol coset blocks.',
-      zh: '在 200 组固定种子实验中，原始字符串退火均停滞在 5,911–5,913，因局部交换破坏完整 6 符号陪集块。',
-    },
-    methodNotes: {
-      en: 'Operate strictly on quotient-graph cycle edges rather than raw character slices.',
-      zh: '后续局部搜索应在商图环边层级操作，而非直接扰动字符切片。',
-    },
-    authorGithubId: '49012734',
-    authorUsername: 'mateo-silva-demo',
-    selfReportedAgentModel: 'local-qwen-2.5-coder-32b',
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/17',
-    commitSha: 'b307d449a120f8e56c29d01f44e8b7a2c6190f3e',
-    verifierVersion: 'superperm-verifier-v1.0.0',
-    parentArtifactIds: ['art-5904-001'],
-    taskId: 'TASK-5904-001',
-    createdAt: '2026-11-16T21:10:00Z',
-    isDemo: true,
-  },
 ];
 
 export const DEMO_BADGES_BY_USER: Record<string, AwardedBadge[]> = {
@@ -1479,16 +1012,16 @@ export const DEMO_BADGES_BY_USER: Record<string, AwardedBadge[]> = {
       id: 'ub-001',
       code: 'founding_contributor',
       serialNumber: 1,
-      awardedAt: '2026-10-18T11:30:05Z',
-      challengeSlug: 'project-5904',
-      contributionId: 'contrib-5904-001',
-      credentialId: 'ci-cred-5904-0001',
+      awardedAt: '2026-11-14T19:40:05Z',
+      challengeSlug: 'grandmaster',
+      contributionId: 'contrib-gm-002',
+      credentialId: 'ci-cred-gm-0002',
       isDemo: true,
     },
     {
       id: 'ub-002',
       code: 'first_discovery',
-      awardedAt: '2026-10-18T11:30:05Z',
+      awardedAt: '2026-11-14T19:40:05Z',
       challengeSlug: 'grandmaster',
       contributionId: 'contrib-gm-002',
       credentialId: 'ci-cred-gm-0002',
@@ -1569,19 +1102,19 @@ export const DEMO_BADGES_BY_USER: Record<string, AwardedBadge[]> = {
       id: 'ub-010',
       code: 'founding_contributor',
       serialNumber: 4,
-      awardedAt: '2026-11-16T21:10:02Z',
-      challengeSlug: 'project-5904',
-      contributionId: 'contrib-5904-002',
-      credentialId: 'ci-cred-5904-0005',
+      awardedAt: '2026-11-11T16:00:02Z',
+      challengeSlug: 'grandmaster',
+      contributionId: 'contrib-gm-005',
+      credentialId: 'ci-cred-gm-0005',
       isDemo: true,
     },
     {
       id: 'ub-011',
       code: 'first_discovery',
-      awardedAt: '2026-11-16T21:10:02Z',
-      challengeSlug: 'project-5904',
-      contributionId: 'contrib-5904-002',
-      credentialId: 'ci-cred-5904-0005',
+      awardedAt: '2026-11-11T16:00:02Z',
+      challengeSlug: 'grandmaster',
+      contributionId: 'contrib-gm-005',
+      credentialId: 'ci-cred-gm-0005',
       isDemo: true,
     },
   ],
@@ -1621,39 +1154,39 @@ export const DEMO_CREDENTIALS: Credential[] = [
   }),
   // Transparent lifecycle specimen: Superseded historical record
   {
-    id: 'ci-cred-5904-0000-superseded',
+    id: 'ci-cred-gm-0000-superseded',
     status: 'Superseded',
     statusNote: {
-      en: 'Superseded by ci-cred-5904-0001 after canonical JSON schema v1.1 standardized transition indices. Original verification remains archived.',
-      zh: '在规范 JSON 模式 v1.1 统一转移索引后由 ci-cred-5904-0001 替代；原始验证记录永久留档。',
+      en: 'Superseded by ci-cred-gm-0002 after continuation-history LMR and singular extensions standardized the SPRT harness. Original verification remains archived.',
+      zh: '在延续历史 LMR 与奇异延伸统一 SPRT 校验基准后由 ci-cred-gm-0002 替代；原始验证记录永久留档。',
     },
     contributorGithubId: '10482911',
     contributorUsername: 'elena-rostova-demo',
     contributorAvatarUrl: DEMO_USERS[0]!.avatarUrl,
     contributorProfileUrl: DEMO_USERS[0]!.profileUrl,
-    challengeId: 'project-5904',
-    challengeSlug: 'project-5904',
-    challengeName: 'Project 5904',
-    contributionId: 'contrib-5904-001',
+    challengeId: 'grandmaster',
+    challengeSlug: 'grandmaster',
+    challengeName: 'Project Grandmaster',
+    contributionId: 'contrib-gm-002',
     contributionTitle: {
-      en: 'Initial 5,905 decomposition draft (schema v1.0)',
-      zh: '5,905 核分解初版（模式 v1.0）',
+      en: 'Initial LMR tuning prototype (v0.3 draft)',
+      zh: 'LMR 缩减初版原型（v0.3 草案）',
     },
-    contributionType: 'IndependentVerification',
+    contributionType: 'SearchAlgorithm',
     contributionSummary: {
-      en: 'Initial verified parser for the 5,905 superpermutation later superseded by the canonical v1.1 schema.',
-      zh: '5,905 超级排列初版解析验证脚本，后由规范 v1.1 版本替代。',
+      en: 'Initial verified LMR prototype later superseded by the combined continuation-history + singular-extension release.',
+      zh: 'LMR 缩减初版验证原型，后由延续历史与奇异延伸合入版本替代。',
     },
-    taskId: 'TASK-5904-001',
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/2',
+    taskId: 'TASK-GM-001',
+    prUrl: 'https://github.com/common-intelligence/grandmaster/pull/14',
     commitSha: '1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d',
     verificationRunId: 'gh-run-9819901',
     verificationSummary: {
-      en: 'Verified under verifier v0.9.2 prior to schema standardization.',
-      zh: '在模式标准化前经 verifier v0.9.2 校验通过。',
+      en: 'Verified under fastchess-sprt-v0.9.2 prior to harness standardization.',
+      zh: '在基准标准化前经 fastchess-sprt-v0.9.2 校验通过。',
     },
-    verifierVersion: 'superperm-verifier-v0.9.2',
-    issuedAt: '2026-10-15T14:00:00Z',
+    verifierVersion: 'fastchess-sprt-v0.9.2',
+    issuedAt: '2026-11-02T14:00:00Z',
     parentContributionIds: [],
     badgesAwarded: [],
     isDemo: true,
@@ -1775,19 +1308,19 @@ export const DEMO_ACTIVITY_EVENTS: ActivityEvent[] = [
   {
     id: 'evt-203',
     type: 'badge_awarded',
-    challengeSlug: 'project-5904',
-    challengeName: 'Project 5904',
+    challengeSlug: 'grandmaster',
+    challengeName: 'Project Grandmaster',
     actorUsername: 'mateo-silva-demo',
     actorGithubId: '49012734',
     actorAvatarUrl: DEMO_USERS[3]!.avatarUrl,
     summary: {
-      en: 'Awarded Founding Contributor #004 and First Discovery for accepted negative-result benchmark PR #17.',
-      zh: '因 PR #17 可复现失败经验基准获颁「创始贡献者 #004」与「首次发现」奖章。',
+      en: 'Awarded Founding Contributor #004 and First Discovery for accepted negative-result benchmark PR #19.',
+      zh: '因 PR #19 可复现失败经验基准获颁「创始贡献者 #004」与「首次发现」奖章。',
     },
     badgeCode: 'founding_contributor',
-    credentialId: 'ci-cred-5904-0005',
-    prUrl: 'https://github.com/common-intelligence/project-5904/pull/17',
-    createdAt: '2026-11-16T21:10:02Z',
+    credentialId: 'ci-cred-gm-0005',
+    prUrl: 'https://github.com/common-intelligence/grandmaster/pull/19',
+    createdAt: '2026-11-11T16:00:02Z',
     isDemo: true,
   },
   {

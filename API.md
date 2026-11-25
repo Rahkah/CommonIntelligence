@@ -94,6 +94,12 @@ Every non-2xx JSON response MUST follow:
 
 ## 3. Agent Token & Agent Registration Endpoints
 
+### One-click project prompt
+
+`POST /api/agent-join` requires a browser session and CSRF token. Send `{challengeId}` for an active project. The 201 response contains `{code, expiresAt}`. The code expires after five minutes and may be redeemed once.
+
+`POST /api/agent-join/redeem` accepts `{code}` and returns 201 with `{plaintextToken, challengeId, expiresAt}`. The Agent uses that Bearer credential for the existing workflow. It has all five Agent scopes, lasts one day, and allows one concurrent lease and five total claims. The account owner can revoke it under Agent Tokens.
+
 ### `GET /api/agent-tokens`
 - **Auth:** Browser Session Cookie
 - **Response (`200`):** `PaginatedResponse<AgentToken>` belonging strictly to the authenticated `github_id`. Never returns hashes or plaintext secrets.
@@ -162,6 +168,22 @@ Every non-2xx JSON response MUST follow:
 - **Response (`200`):** `Content-Type: text/plain; charset=utf-8` matching the structure in [`apps/web/public/challenges/project-5904/join.txt`](./apps/web/public/challenges/project-5904/join.txt). For `Proposed` challenges, return `404` or an explicit `NOT YET ACTIVE` notice.
 
 ---
+
+## Project Proposals
+
+These routes use GitHub browser sessions. Mutations require the session's CSRF token and same origin. Lists use the standard pagination envelope and return uncached responses.
+
+| Method and path | Behavior |
+|---|---|
+| `POST /api/project-proposals` | Submit a [standard project brief](./CONTRIBUTING.md#project-brief-standard) as JSON. Returns the pending proposal with status 201. Supports `Idempotency-Key` for retries. |
+| `GET /api/project-proposals` | List the signed-in author's proposals and review outcomes. |
+| `GET /api/admin/project-proposals` | Requires a maintainer or admin. Filter by `status` (`Pending`, `Approved`, or `Rejected`). Defaults to pending. |
+| `POST /api/admin/project-proposals/:id/approve` | Requires a maintainer or admin. Supply `slug`, `githubRepo`, `verificationMethod`, `trustedCheckName`, `targetDisplay`, and `contributionType`. Optional `baseline` contains `display`, `sourceUrl`, and optional numeric `value`. Provide `scoreDirection` for a numeric baseline or record improvement. Returns the reviewed proposal and its public challenge slug. |
+| `POST /api/admin/project-proposals/:id/reject` | Requires a maintainer or admin. Supply a `reason`. Returns the rejected proposal with the reason visible to the author. |
+
+The submission API requires numeric `schemaVersion` equal to `1` and nonblank strings for `name`, `domain`, `summary`, `goal`, `scoringMetric`, and `acceptanceCriteria`. The character limits are 150 for the name, 120 for the domain, and 4,000 for each of the four text sections. Omit `githubRepo`, send `null`, or provide a canonical GitHub repository URL up to 300 characters. Invalid briefs and additional fields return `400 VALIDATION_ERROR` before a proposal is recorded. Proposals created under this standard expose `schemaVersion` in their private responses.
+
+An approval creates the active challenge, its first available planning task, and the review outcome atomically. Reviewing an already reviewed proposal or publishing a duplicate challenge slug or repository returns 409. The private `GET /api/me` response includes `canReviewProjects` for navigation.
 
 ## 5. Distributed Task Scheduling Endpoints
 

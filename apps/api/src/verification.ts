@@ -1,21 +1,10 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { CONTRIBUTION_TYPES } from '@common-intelligence/shared';
 import { type App, sql, utf8, hex, required, fail, field, key, id, now } from './core';
 
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
 const repoName = z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/);
-const kinds = [
-  'RecordImprovement',
-  'SearchAlgorithm',
-  'PruningStrategy',
-  'Optimization',
-  'MathematicalLemma',
-  'VerifiedSearchRegion',
-  'Counterexample',
-  'IndependentVerification',
-  'CandidateStructure',
-  'FailedApproach',
-] as const;
 const runSchema = z.object({
   id: z.number().int().positive(),
   name: field(256),
@@ -185,7 +174,7 @@ hooks.post('/webhooks/github', async (c) => {
     if (parsed.success && parsed.data.base.ref === b.repository.default_branch) {
       const pr = parsed.data,
         body = pr.body ?? '',
-        kind = z.enum(kinds).safeParse(metadata(body, 'Contribution Type'));
+        kind = z.enum(CONTRIBUTION_TYPES).safeParse(metadata(body, 'Contribution Type'));
       const parentText = metadata(body, 'Parent Contributions');
       const parents =
         !parentText || /^none$/i.test(parentText)

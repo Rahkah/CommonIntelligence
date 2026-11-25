@@ -58,6 +58,7 @@ export interface Challenge {
   tagline: LocalizedText;
   domain: LocalizedText;
   status: ChallengeStatus;
+  createdAt?: string;
   summary: LocalizedText;
   background: LocalizedText;
   ultimateGoal: LocalizedText;
@@ -77,6 +78,54 @@ export interface Challenge {
     completedTasksCount: number;
   };
   isDemoStats: boolean;
+}
+
+export const PROJECT_PROPOSAL_STATUSES = ['Pending', 'Approved', 'Rejected'] as const;
+export type ProjectProposalStatus = (typeof PROJECT_PROPOSAL_STATUSES)[number];
+export const PROJECT_BRIEF_VERSION = 1;
+
+export interface ProjectBriefContent {
+  name: string;
+  domain: string;
+  summary: string;
+  goal: string;
+  scoringMetric: string;
+  acceptanceCriteria: string;
+  githubRepo?: string;
+}
+
+export interface ProjectBrief extends ProjectBriefContent {
+  schemaVersion: typeof PROJECT_BRIEF_VERSION;
+}
+
+export type CreateProjectProposalRequest = Omit<ProjectBrief, 'githubRepo'> & {
+  githubRepo?: string | null;
+};
+
+export interface ProjectProposal extends ProjectBriefContent {
+  schemaVersion?: ProjectBrief['schemaVersion'];
+  id: string;
+  authorUsername: string;
+  status: ProjectProposalStatus;
+  submittedAt: string;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  challengeSlug: string | null;
+}
+
+export interface ApproveProjectProposalRequest {
+  slug: string;
+  githubRepo: string;
+  trustedCheckName: string;
+  verificationMethod: string;
+  targetDisplay: string;
+  contributionType: ContributionType;
+  scoreDirection?: 'higher' | 'lower';
+  baseline?: {
+    display: string;
+    sourceUrl: string;
+    value?: number;
+  };
 }
 
 export interface ChallengeProgress {
@@ -115,6 +164,7 @@ export interface AuthSessionResponse {
   mode: 'demo' | 'live';
   user: UserProfileSummary | null;
   csrfToken?: string;
+  canReviewProjects?: boolean;
 }
 
 export type AgentTokenScope =
@@ -236,17 +286,19 @@ export interface ProposeTaskRequest {
 
 export type KnowledgeStatus = 'Verified' | 'Reproduced' | 'Proposed' | 'Refuted' | 'Inconclusive';
 
-export type ContributionType =
-  | 'RecordImprovement'
-  | 'SearchAlgorithm'
-  | 'PruningStrategy'
-  | 'Optimization'
-  | 'MathematicalLemma'
-  | 'VerifiedSearchRegion'
-  | 'Counterexample'
-  | 'IndependentVerification'
-  | 'CandidateStructure'
-  | 'FailedApproach';
+export const CONTRIBUTION_TYPES = [
+  'RecordImprovement',
+  'SearchAlgorithm',
+  'PruningStrategy',
+  'Optimization',
+  'MathematicalLemma',
+  'VerifiedSearchRegion',
+  'Counterexample',
+  'IndependentVerification',
+  'CandidateStructure',
+  'FailedApproach',
+] as const;
+export type ContributionType = (typeof CONTRIBUTION_TYPES)[number];
 
 export interface ResearchArtifact {
   id: string;

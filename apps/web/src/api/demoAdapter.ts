@@ -137,8 +137,15 @@ export const demoAdapter = {
     const now = new Date().toISOString();
     const extra = readJson<Task[]>(STORAGE_KEYS.demoExtraTasks, []);
     const nextNum = String(DEMO_TASKS.length + extra.length + 1).padStart(3, '0');
+    const challenge = DEMO_CHALLENGES.find(
+      (c) => c.id === payload.challengeId || c.slug === payload.challengeId
+    );
+    const prefix =
+      payload.challengeId === 'grandmaster'
+        ? 'GM'
+        : payload.challengeId.replace(/[^a-z0-9]/gi, '').slice(0, 6).toUpperCase() || 'CI';
     const created: Task = {
-      taskId: `TASK-5904-${nextNum}`,
+      taskId: `TASK-${prefix}-${nextNum}`,
       challengeId: payload.challengeId,
       title: { en: payload.title, zh: payload.title },
       description: { en: payload.description, zh: payload.description },
@@ -163,8 +170,8 @@ export const demoAdapter = {
     const evt: ActivityEvent = {
       id: `evt-demo-${Date.now()}`,
       type: 'task_proposed',
-      challengeSlug: payload.challengeId,
-      challengeName: 'Project 5904',
+      challengeSlug: challenge?.slug ?? payload.challengeId,
+      challengeName: challenge?.name ?? payload.challengeId,
       actorUsername: user.username,
       actorGithubId: user.githubId,
       actorAvatarUrl: user.avatarUrl,

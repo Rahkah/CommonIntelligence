@@ -4,7 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-25",
   "compatibility_flags": ["nodejs_compat"],
-  "vars": { "APP_ORIGIN": "http://localhost:8787" },
+  "vars": {
+    "APP_ORIGIN": "http://localhost:8787",
+    "LOCAL_DEV_AUTH_BYPASS": "true",
+    "ADMIN_IP_ALLOWLIST": "141.11.146.88,127.0.0.1,::1"
+  },
   "d1_databases": [{
     "binding": "DB",
     "database_name": "common-intelligence",
@@ -23,7 +27,10 @@
       "name": "common-intelligence-api",
       "account_id": "a17920dd88d0eec815350eba8ecfe9d8",
       "workers_dev": true,
-      "vars": { "APP_ORIGIN": "https://common-intelligence-api.common-intelligence.workers.dev" },
+      "vars": {
+        "APP_ORIGIN": "https://common-intelligence-api.common-intelligence.workers.dev",
+        "ADMIN_IP_ALLOWLIST": "141.11.146.88"
+      },
       "d1_databases": [{
         "binding": "DB",
         "database_name": "common-intelligence",

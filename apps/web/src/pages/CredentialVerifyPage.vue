@@ -21,7 +21,7 @@ import { DEMO_CREDENTIALS } from '@/data/demoData';
 import { useAppState } from '@/stores/appState';
 
 const route = useRoute();
-const { t, loc, state, notify } = useAppState();
+const { t, loc, challengeName, state, notify } = useAppState();
 
 const credential = ref<Credential | null>(null);
 const loading = ref(true);
@@ -241,7 +241,7 @@ async function copyVerifyLink() {
                   :to="`/challenges/${credential.challengeSlug}`"
                   class="font-medium text-accent hover:underline dark:text-accent-dark"
                 >
-                  {{ credential.challengeName }}
+                  {{ challengeName({ slug: credential.challengeSlug, name: credential.challengeName }) }}
                 </RouterLink>
                 <span class="ml-2 font-mono text-ink-faint dark:text-chalk-faint">
                   · {{ credential.contributionType }}

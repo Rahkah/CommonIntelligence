@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  ApproveProjectProposalRequest,
   AgentToken,
   ApiErrorBody,
   AuthSessionResponse,
@@ -9,9 +10,12 @@ import type {
   ContributorFullProfile,
   CreateAgentTokenRequest,
   CreateAgentTokenResponse,
+  CreateProjectProposalRequest,
   Credential,
   PaginatedResponse,
   ProposeTaskRequest,
+  ProjectProposal,
+  ProjectProposalStatus,
   ResearchArtifact,
   Task,
   UserProfileSummary,
@@ -82,8 +86,9 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 export const apiClient = {
   mode: DATA_MODE,
 
-  getGitHubLoginUrl(): string {
-    return `${API_BASE_URL}/auth/github`;
+  getGitHubLoginUrl(returnTo?: string): string {
+    const query = returnTo ? '?returnTo=' + encodeURIComponent(returnTo) : '';
+    return `${API_BASE_URL}/auth/github${query}`;
   },
 
   async getMe(): Promise<AuthSessionResponse> {
@@ -103,10 +108,48 @@ export const apiClient = {
     currentCsrfToken = undefined;
   },
 
-  async listChallenges(): Promise<Challenge[]> {
-    if (DATA_MODE === 'demo') return demoAdapter.listChallenges();
-    const data = await apiFetch<PaginatedResponse<Challenge>>('/api/challenges');
-    return data.items;
+  async listChallenges(offset = 0, limit = 50): Promise<PaginatedResponse<Challenge>> {
+    if (DATA_MODE === 'demo') {
+      const all = await demoAdapter.listChallenges();
+      return { items: all.slice(offset, offset + limit), total: all.length, limit, offset, isDemo: true };
+    }
+    return apiFetch<PaginatedResponse<Challenge>>(`/api/challenges?limit=${limit}&offset=${offset}`);
+  },
+
+  createProjectProposal(body: CreateProjectProposalRequest, key: string): Promise<ProjectProposal> {
+    return apiFetch('/api/project-proposals', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': key },
+      body: JSON.stringify(body),
+    });
+  },
+
+  createAgentJoinCode(challengeId: string): Promise<{ code: string; expiresAt: string }> {
+    return apiFetch('/api/agent-join', {
+      method: 'POST',
+      body: JSON.stringify({ challengeId }),
+    });
+  },
+
+  listProjectProposals(offset: number, reviewStatus?: ProjectProposalStatus): Promise<PaginatedResponse<ProjectProposal>> {
+    const url = reviewStatus
+      ? `/api/admin/project-proposals?status=${reviewStatus}&offset=${offset}`
+      : `/api/project-proposals?offset=${offset}`;
+    return apiFetch(url);
+  },
+
+  approveProjectProposal(id: string, body: ApproveProjectProposalRequest): Promise<ProjectProposal> {
+    return apiFetch(`/api/admin/project-proposals/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  rejectProjectProposal(id: string, reason: string): Promise<ProjectProposal> {
+    return apiFetch(`/api/admin/project-proposals/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
   },
 
   async getChallenge(slugOrId: string): Promise<Challenge | null> {

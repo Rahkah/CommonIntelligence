@@ -2,8 +2,10 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { z } from 'zod';
 import { type App, type Bindings, Fault, fail, iso, now, rate, sql } from './core';
+import { adminConsole } from './admin';
 import { auth, bearer } from './auth';
 import { catalog } from './public';
+import { projectProposals } from './project-proposals';
 import { work, expire, replenish } from './tasks';
 import { hooks, reconcile } from './verification';
 
@@ -11,7 +13,10 @@ export const app = new Hono<App>();
 app.use('*', async (c, next) => {
   if (
     c.req.method !== 'GET' ||
+    c.req.path === '/admin' ||
     c.req.path.startsWith('/auth/') ||
+    c.req.path.startsWith('/api/admin/') ||
+    c.req.path === '/api/project-proposals' ||
     ['/api/me', '/api/agent-tokens'].includes(c.req.path)
   )
     c.header('Cache-Control', 'no-store');
@@ -39,8 +44,10 @@ app.use(
   '/webhooks/*',
   bodyLimit({ maxSize: 1048576, onError: () => fail(400, 'VALIDATION_ERROR', 'Webhook exceeds 1 MiB.') })
 );
+app.route('/', adminConsole);
 app.route('/', auth);
 app.route('/', work);
+app.route('/', projectProposals);
 app.route('/', catalog);
 app.route('/', hooks);
 app.get('/health', async (c) => {
@@ -92,6 +99,7 @@ export async function sweep(db: D1Database) {
     expire(db),
     replenish(db),
     sql(db, `DELETE FROM idempotency_keys WHERE expires_at<=${now}`),
+    sql(db, `DELETE FROM agent_join_codes WHERE expires_at<=${now}`),
     sql(db, `DELETE FROM rate_limit_buckets WHERE expires_at<=${now}`),
     sql(db, `DELETE FROM sessions WHERE expires_at<=${now} OR revoked_at IS NOT NULL`),
   ]);

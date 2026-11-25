@@ -1,24 +1,28 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import type { AwardedBadge, Challenge, UserProfileSummary } from '@common-intelligence/shared';
-import { ArrowRight, ChevronDown, FileText, Github, KeyRound, Terminal } from 'lucide-vue-next';
-import CopyCommandBox from '@/components/CopyCommandBox.vue';
+import { ArrowRight, ChevronDown, FileText, Github, Terminal } from 'lucide-vue-next';
+import AgentJoinPrompt from '@/components/AgentJoinPrompt.vue';
 import HonorSeal from '@/components/HonorSeal.vue';
 import StatusPill from '@/components/StatusPill.vue';
-import { apiClient, PUBLIC_APP_URL } from '@/api/client';
+import { apiClient } from '@/api/client';
 import { DEMO_BADGES_BY_USER } from '@/data/demoData';
 import { useAppState } from '@/stores/appState';
 
-const { t, loc, state, signInWithGitHub } = useAppState();
+const { t, loc, challengeName, challengeStatus, metricDisplay, state, signInWithGitHub } = useAppState();
 
 const challenges = ref<Challenge[]>([]);
 const contributors = ref<UserProfileSummary[]>([]);
 const showAllChallenges = ref(false);
 const loading = ref(true);
+const challengeTotal = ref(0);
+const challengeOffset = ref(0);
+const catalogError = ref(false);
 
 const flagship = computed(
-  () => challenges.value.find((c) => c.slug === 'grandmaster') ?? challenges.value[0] ?? null
+  () => challenges.value.find((c) => c.slug === 'grandmaster' && c.status === 'Active')
 );
+const featured = computed(() => flagship.value ?? challenges.value.find((c) => c.status === 'Active'));
 
 const otherChallenges = computed(() =>
   challenges.value.filter((c) => c.id !== flagship.value?.id)
@@ -27,11 +31,6 @@ const otherChallenges = computed(() =>
 const visibleOtherChallenges = computed(() =>
   showAllChallenges.value ? otherChallenges.value : otherChallenges.value.slice(0, 6)
 );
-
-const joinInstruction = computed(() => {
-  const slug = flagship.value?.slug ?? 'grandmaster';
-  return `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/${slug}/join.txt to join the Common Intelligence experiment.`;
-});
 
 const eloProgressPct = computed(() => {
   const rec = flagship.value?.record;
@@ -53,17 +52,24 @@ function badgesForUser(user: UserProfileSummary): AwardedBadge[] {
   return user.isDemo ? DEMO_BADGES_BY_USER[user.githubId] ?? [] : user.badges ?? [];
 }
 
-onMounted(async () => {
+async function loadChallenges() {
+  loading.value = true;
+  catalogError.value = false;
   try {
-    const [ch, users] = await Promise.all([
-      apiClient.listChallenges(),
-      apiClient.listContributors(),
-    ]);
-    challenges.value = ch;
-    contributors.value = users;
+    const page = await apiClient.listChallenges(challengeOffset.value);
+    const previous = new Set(challenges.value.map(({ id }) => id));
+    challenges.value.push(...page.items.filter(({ id }) => !previous.has(id)));
+    challengeTotal.value = page.total;
+    challengeOffset.value = page.offset + page.items.length;
+  } catch {
+    catalogError.value = true;
   } finally {
     loading.value = false;
   }
+}
+onMounted(() => {
+  void loadChallenges();
+  apiClient.listContributors().then((users) => { contributors.value = users; }).catch(() => {});
 });
 </script>
 
@@ -76,7 +82,12 @@ onMounted(async () => {
       </div>
 
       <h1
-        class="mt-3 whitespace-nowrap font-editorial text-[clamp(1.125rem,3.3vw,2.55rem)] font-medium leading-[1.15] tracking-tight text-ink dark:text-chalk"
+        class="mt-3 whitespace-nowrap font-editorial font-medium leading-[1.15] tracking-tight text-ink dark:text-chalk"
+        :class="
+          state.locale === 'zh'
+            ? 'text-[clamp(1rem,4.5vw,2.55rem)]'
+            : 'text-[clamp(0.95rem,4vw,2.55rem)]'
+        "
       >
         {{ t.home.headline }}
       </h1>
@@ -95,27 +106,20 @@ onMounted(async () => {
           <Github class="h-4 w-4" />
           <span>{{ t.nav.signIn }}</span>
         </button>
-        <RouterLink
-          v-else
-          to="/settings/tokens"
-          class="inline-flex items-center gap-2 rounded bg-ink px-4 py-2.5 text-sm font-medium text-paper transition hover:opacity-90 dark:bg-chalk dark:text-obsidian"
-        >
-          <KeyRound class="h-4 w-4" />
-          <span>{{ t.home.manageTokens }} (@{{ state.user.username }})</span>
-        </RouterLink>
 
         <RouterLink
-          to="/challenges/grandmaster"
+          v-if="featured"
+          :to="{ name: 'challenge', params: { slug: featured.slug } }"
           class="inline-flex items-center gap-2 rounded border border-border-light bg-surface px-4 py-2.5 text-sm font-medium text-ink transition hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk dark:hover:border-chalk/40"
         >
-          <span>{{ t.home.exploreActive }}</span>
+          <span>{{ flagship ? t.home.exploreActive : t.home.viewChallenge }}</span>
           <ArrowRight class="h-4 w-4" />
         </RouterLink>
       </div>
     </section>
 
     <!-- 2. One-Line Agent Join Prompt -->
-    <section class="mt-12">
+    <section v-if="featured" class="mt-12">
       <div
         class="rounded-lg border border-border-light bg-surface p-5 sm:p-6 dark:border-border-dark dark:bg-obsidian-surface"
       >
@@ -128,7 +132,7 @@ onMounted(async () => {
           </div>
           <div class="flex items-center gap-4 text-xs">
             <a
-              href="/challenges/grandmaster/join.txt"
+              :href="featured.joinInstructionsPath"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-1 font-mono text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
@@ -136,18 +140,11 @@ onMounted(async () => {
               <FileText class="h-3.5 w-3.5" />
               <span>join.txt</span>
             </a>
-            <RouterLink
-              to="/settings/tokens"
-              class="inline-flex items-center gap-1 font-medium text-accent hover:underline dark:text-accent-dark"
-            >
-              <KeyRound class="h-3.5 w-3.5" />
-              <span>{{ t.home.manageTokens }}</span>
-            </RouterLink>
           </div>
         </div>
 
         <div class="mt-3">
-          <CopyCommandBox :text="joinInstruction" />
+          <AgentJoinPrompt :challenge-id="featured.id" :slug="featured.slug" :instructions-path="featured.joinInstructionsPath" />
         </div>
 
         <p class="mt-2.5 font-mono text-[11.5px] text-ink-faint dark:text-chalk-faint">
@@ -158,16 +155,22 @@ onMounted(async () => {
 
     <!-- 3. Public Challenges (Flagship Chess Engine vs Stockfish 19 + Other Open/Proposed) -->
     <section id="challenges" class="mt-14 scroll-mt-20 space-y-5">
-      <div class="flex items-end justify-between gap-4">
+      <div class="flex flex-wrap items-center justify-between gap-4">
         <h2 class="text-lg font-semibold tracking-tight text-ink dark:text-chalk">
           {{ state.locale === 'zh' ? '公共挑战' : 'Public Challenges' }}
         </h2>
-        <RouterLink
-          to="/live"
-          class="font-mono text-xs text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
-        >
-          {{ t.nav.live }} →
-        </RouterLink>
+        <div class="flex flex-wrap items-center gap-4">
+          <RouterLink to="/live" class="font-mono text-xs text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk">
+            {{ t.nav.live }} →
+          </RouterLink>
+          <RouterLink v-if="state.dataMode === 'api' && state.user" :to="{ name: 'my-projects' }" class="project-link">
+            {{ t.projects.mine }}
+          </RouterLink>
+          <RouterLink v-if="state.canReviewProjects" :to="{ name: 'review-projects' }" class="project-link">
+            {{ t.projects.review }}
+          </RouterLink>
+          <RouterLink :to="{ name: 'new-project' }" class="project-button">{{ t.projects.newProject }}</RouterLink>
+        </div>
       </div>
 
       <!-- Flagship Challenge Card: Project Grandmaster vs Stockfish 19 -->
@@ -178,14 +181,21 @@ onMounted(async () => {
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="space-y-1.5">
             <div class="flex flex-wrap items-center gap-2">
-              <StatusPill :label="flagship.status" tone="accent" />
+              <StatusPill
+                :label="challengeStatus(flagship.status)"
+                tone="accent"
+                :mono="state.locale !== 'zh'"
+              />
               <span class="font-mono text-[11px] uppercase tracking-wider text-ink-faint dark:text-chalk-faint">
                 {{ t.home.matchupLabel }}
               </span>
             </div>
-            <h3 class="text-2xl font-semibold tracking-tight text-ink dark:text-chalk">
-              <RouterLink :to="`/challenges/${flagship.slug}`" class="hover:underline">
-                {{ flagship.name }}
+            <h3 class="pt-1 text-2xl font-bold tracking-tight">
+              <RouterLink
+                :to="`/challenges/${flagship.slug}`"
+                class="project-title-highlight transition hover:opacity-90 hover:underline"
+              >
+                {{ challengeName(flagship) }}
               </RouterLink>
             </h3>
             <p class="max-w-2xl text-sm text-ink-muted dark:text-chalk-muted">
@@ -210,7 +220,7 @@ onMounted(async () => {
               <StatusPill v-if="flagship.isDemoStats" label="DEMO" tone="demo" />
             </div>
             <div class="mt-1 font-mono text-3xl font-semibold tabular-nums text-accent dark:text-accent-dark">
-              {{ flagship.record.currentBestDisplay }}
+              {{ metricDisplay(flagship.record.currentBestDisplay) }}
             </div>
             <div v-if="eloGap !== null" class="mt-0.5 font-mono text-[11.5px] text-ink-muted dark:text-chalk-muted">
               {{
@@ -254,7 +264,11 @@ onMounted(async () => {
       </div>
 
       <!-- Compact Other Public Challenges Grid -->
-      <div v-if="!loading" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        v-if="visibleOtherChallenges.length"
+        class="grid gap-3 sm:grid-cols-2"
+        :class="{ 'lg:grid-cols-3': visibleOtherChallenges.length > 2 }"
+      >
         <RouterLink
           v-for="ch in visibleOtherChallenges"
           :key="ch.id"
@@ -263,12 +277,13 @@ onMounted(async () => {
         >
           <div>
             <div class="flex items-center justify-between gap-2">
-              <h3 class="text-sm font-semibold text-ink group-hover:text-accent dark:text-chalk dark:group-hover:text-accent-dark">
-                {{ ch.name }}
+              <h3 class="project-card-title">
+                {{ challengeName(ch) }}
               </h3>
               <StatusPill
-                :label="ch.status"
+                :label="challengeStatus(ch.status)"
                 :tone="ch.status === 'Active' ? 'accent' : 'neutral'"
+                :mono="state.locale !== 'zh'"
               />
             </div>
             <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
@@ -295,13 +310,21 @@ onMounted(async () => {
                   ? '收起候选挑战'
                   : 'Show fewer'
                 : state.locale === 'zh'
-                  ? `展开全部 ${challenges.length} 个挑战`
-                  : `Show all ${challenges.length} challenges`
+                  ? '展开更多挑战'
+                  : 'Show more challenges'
             }}
           </span>
           <ChevronDown class="h-3.5 w-3.5 transition" :class="{ 'rotate-180': showAllChallenges }" />
         </button>
       </div>
+      <p v-if="loading" role="status" class="text-sm">{{ t.common.loading }}</p>
+      <div v-else-if="catalogError" role="alert" class="flex flex-wrap gap-3 text-sm">
+        <p>{{ t.projects.requestError }}</p>
+        <button type="button" class="project-link" @click="loadChallenges">{{ t.projects.retry }}</button>
+      </div>
+      <button v-else-if="showAllChallenges && challengeOffset < challengeTotal" type="button" class="project-link" @click="loadChallenges">
+        {{ t.projects.more }}
+      </button>
     </section>
 
     <!-- 4. Contributors Roster -->
