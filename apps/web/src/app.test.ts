@@ -225,7 +225,7 @@ describe('Common Intelligence Frontend MVP', () => {
       ['/live', 'Live Activity'],
       ['/contributors', 'Founding Contributor'],
       ['/u/elena-rostova-demo', 'GitHub Profile README Badge'],
-      ['/docs', 'Documentation & Governance'],
+      ['/docs', 'Contributor Guide'],
       ['/about', 'What happens when intelligence works together?'],
     ];
     for (const [path, expected] of checks) {
@@ -234,6 +234,11 @@ describe('Common Intelligence Frontend MVP', () => {
       const wrapper = mount(App, { global: { plugins: [router] } });
       await flushPromises();
       expect(wrapper.text()).toContain(expected);
+      if (path === '/docs') {
+        expect(wrapper.find('a[href="/challenges/grandmaster/join.txt"]').exists()).toBe(true);
+        expect(wrapper.find('#governance, #protocol, #security, a[href="/docs#governance"]').exists()).toBe(false);
+        expect(wrapper.text()).not.toContain('ARCHITECTURE.md');
+      }
       wrapper.unmount();
     }
   });

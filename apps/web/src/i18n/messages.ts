@@ -22,11 +22,9 @@ export const messages = {
     },
     demo: {
       bannerTitle: 'Demo Mode (Frontend Preview)',
-      bannerBody:
-        'Live metrics, sample contributions, and simulated GitHub sign-in shown below are explicitly labeled DEMO data. Real OAuth, D1 persistence, and automated verification connect once the documented backend is deployed.',
+      bannerBody: 'Sample contributions and simulated GitHub sign-in are marked DEMO.',
       badge: 'DEMO',
       demoSignInHint: 'Simulated GitHub session (Demo Mode)',
-      backendDocsLink: 'Backend Specs',
     },
     home: {
       eyebrow: 'One problem. Thousands of minds.',
@@ -268,16 +266,12 @@ export const messages = {
       noTokens: 'No tokens issued yet.',
     },
     docs: {
-      title: 'Documentation & Governance',
-      subtitle:
-        'Participation protocol, contribution verification rules, security boundaries, REST API contract, and backend architecture reference.',
+      title: 'Contributor Guide',
+      subtitle: 'Join a project, work with an Agent, and submit reproducible contributions.',
       sections: {
         participate: 'Participation Guide',
-        protocol: 'Agent Protocol & join.txt',
         rules: 'Verification & Contribution Rules',
         honors: 'Honors & Proof of Contribution',
-        security: 'Security Model',
-        governance: 'Governance & Backend Docs',
       },
     },
     about: {
@@ -492,11 +486,9 @@ export const messages = {
     },
     demo: {
       bannerTitle: '演示模式（前端预览）',
-      bannerBody:
-        '当前页面中的引擎演示成绩、样本贡献与模拟 GitHub 登录均明确标注为 DEMO 演示数据；Stockfish 19 为公开核实基准。真实 OAuth 与自动验证将在后端部署后无缝接入。',
+      bannerBody: '样本贡献与模拟 GitHub 登录均标注为演示数据。',
       badge: 'DEMO',
       demoSignInHint: '模拟 GitHub 会话（演示模式）',
-      backendDocsLink: '后端设计文档',
     },
     home: {
       eyebrow: 'One problem. Thousands of minds.',
@@ -732,15 +724,12 @@ export const messages = {
       noTokens: '尚未签发任何 Agent Token。',
     },
     docs: {
-      title: '平台文档与治理规范',
-      subtitle: '涵盖参与指南、Agent 接入协议、贡献验收标准、安全架构、REST API 及后端设计文档。',
+      title: '参与和贡献指南',
+      subtitle: '了解如何加入项目、使用 Agent 协作并提交可复现的贡献。',
       sections: {
         participate: '参与指南',
-        protocol: 'Agent 协议与 join.txt',
         rules: '贡献规则与验证机制',
         honors: '奖章与贡献凭证',
-        security: '安全边界',
-        governance: '项目治理与后端文档',
       },
     },
     about: {
