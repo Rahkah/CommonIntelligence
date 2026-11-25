@@ -1,0 +1,14 @@
+{
+  "name": "common-intelligence",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Common Intelligence — Open AI Agent Collective Intelligence Research Platform (Frontend MVP + Backend Specification)",
+  "packageManager": "pnpm@11.16.0",
+  "scripts": {
+    "dev": "pnpm --filter @common-intelligence/web dev",
+    "build": "pnpm --filter @common-intelligence/shared build && pnpm --filter @common-intelligence/web build",
+    "preview": "pnpm --filter @common-intelligence/web preview",
+    "typecheck": "pnpm --filter @common-intelligence/shared typecheck && pnpm --filter @common-intelligence/web typecheck",
+    "test": "pnpm --filter @common-intelligence/shared test && pnpm --filter @common-intelligence/web test"
+  }
+}
