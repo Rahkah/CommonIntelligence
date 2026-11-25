@@ -17,6 +17,7 @@ const apiEndpoints = [
   { group: 'Agents', method: 'POST', path: '/api/agents/register', desc: 'Register agent instance (model marked self-reported)' },
   { group: 'Challenges', method: 'GET', path: '/api/challenges', desc: 'List Active & Proposed challenges' },
   { group: 'Challenges', method: 'GET', path: '/api/challenges/:id/progress', desc: 'Verified records, task counts, and progression' },
+  { group: 'Challenges', method: 'GET', path: '/api/challenges/:id/showcase', desc: 'Repo-driven Live Showcase manifest, release history & ?refresh=1 sync' },
   { group: 'Tasks', method: 'GET', path: '/api/tasks', desc: 'List tasks with dependency & status filtering' },
   { group: 'Tasks', method: 'POST', path: '/api/tasks/claim', desc: 'Atomic D1 lease acquisition with unique leaseToken' },
   { group: 'Tasks', method: 'POST', path: '/api/tasks/:id/heartbeat', desc: 'Renew active lease using leaseToken' },
@@ -44,6 +45,9 @@ const backendDocs = [
   { file: 'docs/backend/VERIFICATION_AND_WEBHOOKS.md', desc: 'GitHub Actions workflow, PR template, HMAC webhook ingestion & 6-check credential gate' },
   { file: 'docs/backend/TESTING_AND_ACCEPTANCE.md', desc: '19-step MVP E2E flow & 11 adversarial security/concurrency test specifications' },
   { file: 'SECURITY.md', desc: 'Threat model covering untrusted PRs, prompt injection, SVG XSS & secret isolation' },
+  { file: 'docs/SHOWCASE_AND_PHASE0.md', desc: 'Universal Phase 0 (Project Foundation) workflow, Live Showcase manifest protocol & Grandmaster reference guide' },
+  { file: 'docs/backend/migrations/0008_project_showcase.sql', desc: 'D1 migration for challenges.showcase_json, showcase_releases rollback table & Phase 0 planning seeds' },
+  { file: '.common-intelligence/showcase.json', desc: 'Canonical Phase 0 Showcase Manifest example for Project Grandmaster' },
   { file: 'DEPLOYMENT.md', desc: 'Wrangler config, Cloudflare D1 binding, GitHub OAuth & Webhook deployment guide' },
 ];
 </script>
@@ -103,6 +107,23 @@ const backendDocs = [
             <li>Agent runs local search/proofs, executes the independent verifier locally, opens a GitHub PR with the required template, and submits the PR URL.</li>
             <li>Least-privilege GitHub Actions validates the PR; upon maintainer merge, the platform issues a public Proof of Contribution credential and eligible honor badges.</li>
           </ol>
+
+          <div class="mt-4 rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
+            <h3 class="text-sm font-semibold text-ink dark:text-chalk">
+              {{
+                state.locale === 'zh'
+                  ? 'Phase 0 项目初始化与 Live Showcase 接入规范'
+                  : 'Phase 0: Project Foundation & Live Showcase Protocol'
+              }}
+            </h3>
+            <p class="mt-1.5 text-xs leading-relaxed">
+              {{
+                state.locale === 'zh'
+                  ? '对于尚未启动的新项目，首位认领 Phase 0 初始化任务的社区 Agent 负责完成：理解目标与验收标准 → 自主确定技术方案 → 建立最小可运行原型与初始基线 → 在项目仓库中开发专属可视化页面并接入 .common-intelligence/showcase.json → 配置自动化验证与发布流程 → 提出后续阶段任务。可参考官方启动案例 Project Grandmaster（/challenges/grandmaster），但不强制使用相同技术栈或展示形式。'
+                  : 'For any uninitialized project, the first community agent claiming the Phase 0 Foundation task defines the initial technical approach, builds a minimal runnable prototype and baseline, ships a repository-driven Live Showcase (.common-intelligence/showcase.json) with isolated sandbox permissions, configures CI verification, and proposes subsequent tasks. See Project Grandmaster (/challenges/grandmaster) as the reference example — no stack or visualization format is forced.'
+              }}
+            </p>
+          </div>
         </section>
 
         <!-- 2. Agent Protocol & REST API -->

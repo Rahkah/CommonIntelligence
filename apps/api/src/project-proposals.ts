@@ -4,6 +4,7 @@ import {
   CONTRIBUTION_TYPES,
   PROJECT_BRIEF_VERSION,
   PROJECT_PROPOSAL_STATUSES,
+  createDefaultPendingShowcase,
   isProjectRepositoryUrl,
   validateProjectBrief,
   type ProjectBriefContent,
@@ -133,6 +134,10 @@ projectProposals.post('/api/admin/project-proposals/:id/approve', async (c) => {
         verificationMode: 'Automated + Maintainer',
         criteria,
       }],
+      showcase: createDefaultPendingShowcase(
+        proposal.name,
+        proposal.visualizationGoal ? localized(proposal.visualizationGoal) : undefined
+      ),
       record: {
         currentBestDisplay: body.baseline?.display ?? 'Unrated',
         currentBestValue: body.baseline?.value,

@@ -296,14 +296,34 @@ it('runs the planner, two independent agents, PR proof, honors, dead ends, and d
   expect(catalog.items.find((c) => c.id === 'ai-civilization')).toMatchObject({
     name: 'AI 文明模拟', status: 'Active', stats: { openTasksCount: 1 },
   });
-  expect(await (await request('/challenges/ai-civilization/join.txt')).text()).toContain('first planning task');
-  expect(catalog.items.find((c) => c.id === 'grandmaster').record.currentBestValue).toBeUndefined();
+  const aiInstructions = await (await request('/challenges/ai-civilization/join.txt')).text();
+  expect(aiInstructions).toContain('first planning task');
+  expect(aiInstructions).toContain('Task decomposition rules');
+  const aiTasks = await ok(request('/api/tasks?challengeId=ai-civilization&status=Available'));
+  expect(aiTasks.items[0].isPlanning).toBe(true);
+  expect(aiTasks.items[0].outputRequirements.en).toContain('one independently useful deliverable');
+  expect(catalog.items.find((c) => c.id === 'grandmaster').record.currentBestValue).toBe(1905);
   expect((await ok(request('/api/challenges/grandmaster/progress'))).tasksByStatus.Available).toBe(2);
-  expect(await (await request('/challenges/grandmaster/join.txt')).text()).toContain('leaseToken');
+  expect((await ok(request('/api/challenges/grandmaster/progress'))).tasksByStatus.Accepted).toBe(1);
+  const grandmasterInstructions = await (await request('/challenges/grandmaster/join.txt')).text();
+  expect(grandmasterInstructions).toContain('leaseToken');
+  expect(grandmasterInstructions).toContain('Task decomposition rules');
+  const grandmasterTasks = await ok(request('/api/tasks?challengeId=grandmaster&status=Available'));
+  expect(grandmasterTasks.items[0].outputRequirements.en).not.toContain('Task decomposition rules');
+  expect(await (await request('/challenges/grandmaster/join.txt')).text()).toContain('.common-intelligence/showcase.json');
+
+  // Verify Live Showcase API, pending empty state on uninitialized projects, and rollback on invalid manifest
+  const gmShowcase = await ok(request('/api/challenges/grandmaster/showcase'));
+  expect(gmShowcase.showcase).toMatchObject({ kind: 'chess-trainer', status: 'live', version: '0.1.0' });
+  const civShowcase = await ok(request('/api/challenges/ai-civilization/showcase'));
+  expect(civShowcase.showcase.status).toBe('pending');
+  expect(civShowcase.showcase.visualizationGoal.en).toContain('This project is waiting for its first contributor.');
   const a = await agent(await login()),
     b = await agent(await login()),
     cid = await challenge();
   const plan = await ok(claim(a, cid));
+  const planner = await ok(request('/api/tasks/' + plan.taskId));
+  expect(planner.outputRequirements.zh).toContain('任务拆解规则');
   const route = '/api/tasks/' + plan.taskId + '/plan';
   const body = {
     agentId: a.id,

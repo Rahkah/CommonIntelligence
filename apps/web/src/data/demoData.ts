@@ -341,6 +341,31 @@ export const DEMO_CHALLENGES: Challenge[] = [
     ],
     githubRepo: 'https://github.com/common-intelligence/grandmaster',
     joinInstructionsPath: '/challenges/grandmaster/join.txt',
+    showcase: {
+      schemaVersion: 1,
+      kind: 'chess-trainer',
+      status: 'live',
+      version: '0.1.0',
+      repoManifestPath: '.common-intelligence/showcase.json',
+      title: {
+        en: 'Grandmaster-CI v0.1.0 — Phase 0 Engine & Live Match Showcase',
+        zh: 'Grandmaster-CI v0.1.0 — Phase 0 真实引擎与对弈展示区',
+      },
+      visualizationGoal: {
+        en: 'Display the clean-room chess engine’s real benchmark games, interactive board replay, move-by-move centipawn evaluation, real Elo progression, W/D/L rates, depth/NPS telemetry, and optional live classical search/eval optimization runs.',
+        zh: '展示洁净室国际象棋引擎的真实基准对弈、交互式棋盘与棋谱回放、逐着厘兵评估、实测 Elo 变化曲线、胜和负率、搜索深度与速度（NPS），并支持启动真实的传统搜索/评估优化实验或人机对弈。',
+      },
+      dataEndpoint: '/api/challenges/grandmaster/showcase',
+      refreshMode: 'poll',
+      permissions: ['allow-scripts', 'allow-pointer-lock'],
+      build: {
+        command: 'node --experimental-strip-types packages/grandmaster-engine/src/run-baseline.ts',
+        workflow: 'grandmaster-verifier-v1',
+        publishTarget: 'Common Intelligence Live Showcase',
+      },
+      updatedAt: '2026-11-26T01:08:00Z',
+      source: 'repo',
+    },
     stats: {
       contributorsCount: 4,
       verifiedContributionsCount: 5,

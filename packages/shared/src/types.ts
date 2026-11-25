@@ -51,6 +51,80 @@ export interface ChallengeRecordInfo {
   sourceLabel: string;
 }
 
+export type ShowcaseKind =
+  | 'chess-trainer'
+  | 'interactive-app'
+  | 'visualization'
+  | 'game'
+  | 'embed'
+  | 'link'
+  | 'replay'
+  | 'metrics'
+  | 'pending';
+
+export interface ShowcaseMetric {
+  label: LocalizedText;
+  value: string;
+  delta?: string;
+  tone?: 'neutral' | 'accent' | 'success' | 'warning';
+}
+
+export interface ShowcaseBuildSpec {
+  command?: string;
+  workflow?: string;
+  publishTarget?: string;
+}
+
+export interface ShowcaseReplayItem {
+  id: string;
+  title: LocalizedText;
+  summary?: LocalizedText;
+  url?: string;
+  recordedAt?: string;
+}
+
+export interface ProjectShowcase {
+  schemaVersion: 1;
+  kind: ShowcaseKind;
+  title: LocalizedText;
+  visualizationGoal: LocalizedText;
+  status: 'live' | 'pending';
+  repoManifestPath: string;
+  /** Showcase semantic version published by the project repository. */
+  version?: string;
+  /** Git commit SHA of the published showcase release. */
+  commitSha?: string;
+  /** Optional Pull Request URL that produced this showcase release. */
+  prUrl?: string;
+  /** Optional HTTPS URL rendered inside an isolated sandboxed iframe. */
+  embedUrl?: string;
+  /** Optional HTTPS external launch / playable URL. */
+  launchUrl?: string;
+  launchLabel?: LocalizedText;
+  embedHeight?: number;
+  /** Optional real-time experiment data endpoint (HTTPS or same-origin /api/...). */
+  dataEndpoint?: string;
+  refreshMode?: 'none' | 'poll' | 'sse';
+  /** Whitelisted sandbox permissions for isolated iframe embeds (never includes allow-same-origin). */
+  permissions?: string[];
+  build?: ShowcaseBuildSpec;
+  metrics?: ShowcaseMetric[];
+  replays?: ShowcaseReplayItem[];
+  config?: Record<string, unknown>;
+  updatedAt?: string;
+  source?: 'repo' | 'database' | 'default';
+}
+
+export interface ShowcaseRelease {
+  id: string;
+  challengeId: string;
+  version: string;
+  commitSha: string | null;
+  status: 'published' | 'failed';
+  errorMessage: string | null;
+  publishedAt: string;
+}
+
 export interface Challenge {
   id: string;
   slug: string;
@@ -68,6 +142,7 @@ export interface Challenge {
   scoringMetric: LocalizedText;
   verificationMethod: LocalizedText;
   contributionCriteria: ContributionTypeCriterion[];
+  showcase?: ProjectShowcase | null;
   githubRepo: string;
   joinInstructionsPath: string;
   stats: {
@@ -91,6 +166,7 @@ export interface ProjectBriefContent {
   goal: string;
   scoringMetric: string;
   acceptanceCriteria: string;
+  visualizationGoal?: string;
   githubRepo?: string;
 }
 

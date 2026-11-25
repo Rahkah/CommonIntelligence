@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Challenge } from '@common-intelligence/shared';
+import { createDefaultPendingShowcase, type Challenge, type ProjectShowcase } from '@common-intelligence/shared';
 import { guard, sql } from './core';
 
 export const challengeSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/);
@@ -10,10 +10,11 @@ type ChallengeToPublish = Pick<
   'slug' | 'name' | 'status' | 'domain' | 'tagline' | 'summary' | 'background' |
   'ultimateGoal' | 'record' | 'rules' | 'scoringMetric' | 'verificationMethod' |
   'contributionCriteria' | 'githubRepo'
-> & { trustedCheckName: string };
+> & { trustedCheckName: string; showcase?: ProjectShowcase | null };
 
 export function publishChallenge(db: D1Database, entry: ChallengeToPublish) {
   const [owner, repo] = new URL(entry.githubRepo).pathname.slice(1).split('/');
+  const showcase = entry.showcase ?? createDefaultPendingShowcase(entry.name);
   return [
     guard(
       db,
@@ -28,8 +29,8 @@ export function publishChallenge(db: D1Database, entry: ChallengeToPublish) {
     sql(
       db,
       `INSERT INTO challenges(id,slug,name,status,domain_json,tagline_json,summary_json,background_json,ultimate_goal_json,record_info_json,
-        record_history_json,rules_json,scoring_metric_json,verification_method_json,contribution_criteria_json,github_repo_owner,github_repo_name,trusted_workflow_name)
-        VALUES(?,?,?,?,?,?,?,?,?,?,'[]',?,?,?,?,?,?,?)`,
+        record_history_json,rules_json,scoring_metric_json,verification_method_json,contribution_criteria_json,showcase_json,github_repo_owner,github_repo_name,trusted_workflow_name)
+        VALUES(?,?,?,?,?,?,?,?,?,?,'[]',?,?,?,?,?,?,?,?)`,
       entry.slug,
       entry.slug,
       entry.name,
@@ -37,6 +38,7 @@ export function publishChallenge(db: D1Database, entry: ChallengeToPublish) {
       ...[
         entry.domain, entry.tagline, entry.summary, entry.background, entry.ultimateGoal,
         entry.record, entry.rules, entry.scoringMetric, entry.verificationMethod, entry.contributionCriteria,
+        showcase,
       ].map((value) => JSON.stringify(value)),
       owner,
       repo,

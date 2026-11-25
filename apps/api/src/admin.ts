@@ -291,3 +291,39 @@ adminConsole.patch('/api/admin/console/users/:githubId/role', async (c) => {
   if (!updated) fail(404, 'NOT_FOUND');
   return c.json(updated);
 });
+
+adminConsole.patch('/api/admin/console/challenges/:id/progress', async (c) => {
+  assertAdminIp(c, true);
+  const cid = key.parse(c.req.param('id'));
+  const body = await json(
+    c,
+    z
+      .object({
+        record: z.record(z.string(), z.unknown()).optional(),
+        recordHistory: z.array(z.record(z.string(), z.unknown())).optional(),
+        showcase: z.record(z.string(), z.unknown()).optional(),
+      })
+      .strict()
+  );
+  const existing = await sql(
+    c.env.DB,
+    'SELECT id, record_info_json, record_history_json, showcase_json FROM challenges WHERE id=? OR slug=?',
+    cid,
+    cid
+  ).first<{ id: string; record_info_json: string; record_history_json: string; showcase_json: string | null }>();
+  if (!existing) fail(404, 'NOT_FOUND');
+
+  const nextRecord = body.record ? JSON.stringify(body.record) : existing.record_info_json;
+  const nextHistory = body.recordHistory ? JSON.stringify(body.recordHistory) : existing.record_history_json;
+  const nextShowcase = body.showcase ? JSON.stringify(body.showcase) : existing.showcase_json;
+
+  await sql(
+    c.env.DB,
+    `UPDATE challenges SET record_info_json=?, record_history_json=?, showcase_json=?, updated_at=${now} WHERE id=?`,
+    nextRecord,
+    nextHistory,
+    nextShowcase,
+    existing.id
+  ).run();
+  return c.json({ id: existing.id, updated: true });
+});

@@ -17,6 +17,38 @@ export const STARTER_ROADMAP_TASKS: Task[] = [
   // 1. Project Grandmaster (Chess Engine)
   // =========================================================================
   {
+    taskId: 'TASK-GM-P0-01',
+    challengeId: 'grandmaster',
+    title: {
+      en: '[Phase 0] Project Foundation: clean-room chess engine v0.1.0, benchmark baseline & Live Showcase',
+      zh: '[阶段零] 项目初始化：洁净室象棋引擎 v0.1.0、实测基线与实时展示页面',
+    },
+    description: {
+      en: 'Official Phase 0 launch foundation: clean-room rules core verified against standard Perft(1-4), UCI protocol, Alpha-Beta/PVS + Quiescence + Transposition Table + Tapered PST evaluation, reproducible 8-game benchmark gauntlet (1,905 Elo vs Depth-2 anchor, 6W-1D-1L, 212.6k NPS), and repository-driven Live Showcase (.common-intelligence/showcase.json).',
+      zh: '官方 Phase 0 启动初始化交付：通过标准 Perft(1-4) 校验的洁净室规则核心、UCI 协议、Alpha-Beta/PVS + 静态搜索 + 置换表 + 中残局 PST 评估引擎、可复现 8 局基准对抗测试（相对 2 层锚点 6胜1和1负，实测 1,905 Elo，212.6k NPS），以及基于 .common-intelligence/showcase.json 的实时展示页面。',
+    },
+    taskType: 'Implementation',
+    priority: 'Critical',
+    status: 'Accepted',
+    dependencies: [],
+    requiredCapabilities: ['typescript', 'chess-rules', 'uci', 'alpha-beta', 'showcase'],
+    acceptanceCriteria: [
+      {
+        en: 'Exact Perft(1-4) pass on startpos and Kiwipete, UCI command compliance, real automated match baseline, and live interactive Showcase.',
+        zh: '通过 startpos 与 Kiwipete 标准 Perft 校验、支持 UCI 协议、产出真实自动对弈基线报告并上线交互式 Showcase 页面。',
+      },
+    ],
+    inputArtifacts: [],
+    outputRequirements: {
+      en: 'Clean-room engine package @common-intelligence/grandmaster-engine, baseline-report.json, and .common-intelligence/showcase.json.',
+      zh: '交付 @common-intelligence/grandmaster-engine 引擎包、真实基线报告 baseline-report.json 及 .common-intelligence/showcase.json。',
+    },
+    assignedAgentId: null,
+    leaseExpiresAt: null,
+    createdAt: SEED_TIMESTAMP,
+    updatedAt: SEED_TIMESTAMP,
+  },
+  {
     taskId: 'TASK-GM-P1-01',
     challengeId: 'grandmaster',
     title: {

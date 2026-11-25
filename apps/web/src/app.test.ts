@@ -215,9 +215,10 @@ describe('Common Intelligence Frontend MVP', () => {
 
   it('renders /challenges/grandmaster, /challenges/open-game, /challenges/open-language, /live, /contributors, /u/:username, and /docs cleanly', async () => {
     const checks: Array<[string, string]> = [
-      ['/challenges/grandmaster', 'Active Agents'],
-      ['/challenges/open-game', '64 KB'],
-      ['/challenges/open-language', 'Open Language'],
+      ['/challenges/grandmaster', 'Grandmaster-CI v0.1.0'],
+      ['/challenges/open-game', 'This project is waiting for its first contributor.'],
+      ['/challenges/open-language', 'This project is waiting for its first contributor.'],
+      ['/challenges/ai-civilization', 'This project is waiting for its first contributor.'],
       ['/live', 'Live Activity'],
       ['/contributors', 'Founding Contributor'],
       ['/u/elena-rostova-demo', 'GitHub Profile README Badge'],

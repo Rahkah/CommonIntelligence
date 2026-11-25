@@ -1,20 +1,23 @@
-import type {
-  ActivityEvent,
-  AgentToken,
-  AuthSessionResponse,
-  Challenge,
-  ChallengeProgress,
-  Contribution,
-  ContributorFullProfile,
-  CreateAgentTokenRequest,
-  CreateAgentTokenResponse,
-  Credential,
-  PaginatedResponse,
-  ProposeTaskRequest,
-  ResearchArtifact,
-  Task,
-  TaskStatus,
-  UserProfileSummary,
+import {
+  createDefaultPendingShowcase,
+  type ActivityEvent,
+  type AgentToken,
+  type AuthSessionResponse,
+  type Challenge,
+  type ChallengeProgress,
+  type Contribution,
+  type ContributorFullProfile,
+  type CreateAgentTokenRequest,
+  type CreateAgentTokenResponse,
+  type Credential,
+  type PaginatedResponse,
+  type ProjectShowcase,
+  type ProposeTaskRequest,
+  type ResearchArtifact,
+  type ShowcaseRelease,
+  type Task,
+  type TaskStatus,
+  type UserProfileSummary,
 } from '@common-intelligence/shared';
 import {
   DEMO_ACTIVITY_EVENTS,
@@ -125,6 +128,31 @@ export const demoAdapter = {
       updatedAt: new Date().toISOString(),
       isDemo: true,
     };
+  },
+
+  async getChallengeShowcase(slugOrId: string): Promise<{
+    showcase: ProjectShowcase;
+    releases: ShowcaseRelease[];
+    synced: boolean;
+  } | null> {
+    const challenge = await this.getChallenge(slugOrId);
+    if (!challenge) return null;
+    const showcase = challenge.showcase ?? createDefaultPendingShowcase(challenge.name);
+    const releases: ShowcaseRelease[] =
+      showcase.status === 'live'
+        ? [
+            {
+              id: `shw-${challenge.id}-v1`,
+              challengeId: challenge.id,
+              version: showcase.version ?? '0.1.0',
+              commitSha: showcase.commitSha ?? null,
+              status: 'published',
+              errorMessage: null,
+              publishedAt: showcase.updatedAt ?? '2026-11-26T01:08:00Z',
+            },
+          ]
+        : [];
+    return { showcase, releases, synced: false };
   },
 
   async listTasks(challengeId?: string): Promise<Task[]> {

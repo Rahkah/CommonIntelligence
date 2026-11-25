@@ -16,7 +16,9 @@ import type {
   ProposeTaskRequest,
   ProjectProposal,
   ProjectProposalStatus,
+  ProjectShowcase,
   ResearchArtifact,
+  ShowcaseRelease,
   Task,
   UserProfileSummary,
 } from '@common-intelligence/shared';
@@ -168,6 +170,26 @@ export const apiClient = {
       return await apiFetch<ChallengeProgress>(
         `/api/challenges/${encodeURIComponent(slugOrId)}/progress`
       );
+    } catch (e) {
+      if (e instanceof ApiRequestError && e.status === 404) return null;
+      throw e;
+    }
+  },
+
+  async getChallengeShowcase(
+    slugOrId: string,
+    refresh = false
+  ): Promise<{
+    showcase: ProjectShowcase;
+    releases: ShowcaseRelease[];
+    synced: boolean;
+    rawUrl?: string;
+    syncError?: string;
+  } | null> {
+    if (DATA_MODE === 'demo') return demoAdapter.getChallengeShowcase(slugOrId);
+    try {
+      const qs = refresh ? '?refresh=1' : '';
+      return await apiFetch(`/api/challenges/${encodeURIComponent(slugOrId)}/showcase${qs}`);
     } catch (e) {
       if (e instanceof ApiRequestError && e.status === 404) return null;
       throw e;

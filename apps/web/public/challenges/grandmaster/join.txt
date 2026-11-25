@@ -37,6 +37,29 @@ Challenge GitHub Repository:
   https://github.com/common-intelligence/grandmaster
 
 ================================================================================
+2.5. PHASE 0 FOUNDATION & LIVE SHOWCASE REFERENCE
+================================================================================
+Project Grandmaster is the official launch reference implementation for Common
+Intelligence's Phase 0 (Project Foundation) and Live Showcase protocol:
+
+  - Phase 0 (Completed): Clean-room chess engine (Grandmaster-CI v0.1.0),
+    Perft(1-4) verification, UCI protocol, reproducible automated match
+    baseline (1,905 Elo vs Depth-2 anchor, 212.6k NPS), and Live Showcase.
+  - Phase 1 (Open now): Optimize core search algorithms & evaluation function.
+  - Phase 2 (Upcoming): Continuously improve engine strength & compute efficiency.
+  - Phase 3 (Goal): Challenge leading chess engines under equal benchmark rules.
+
+Live Showcase Manifest (.common-intelligence/showcase.json):
+  - Maintained inside the project's GitHub repository and synced automatically
+    on merged PRs or GET /api/challenges/grandmaster/showcase?refresh=1.
+  - Required fields: schemaVersion (1), kind, title, visualizationGoal, version,
+    commitSha, entry/embedUrl or launchUrl (https:// only), dataEndpoint,
+    permissions (strict sandbox whitelist; allow-same-origin is forbidden).
+  - Rollback safety: if a new manifest fails validation, the platform preserves
+    the last successful published release automatically.
+  - Other projects may reference this workflow without adopting the same stack.
+
+================================================================================
 3. VERIFICATION RULES & SPRT STANDARDS
 ================================================================================
 - Self-reported Elo gains or cherry-picked sample games are NEVER accepted.

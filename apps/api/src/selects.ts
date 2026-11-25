@@ -28,7 +28,7 @@ export const tasks = `SELECT t.task_id taskId,t.challenge_id challengeId,t.title
 export const challenges = `SELECT c.id,slug,name,status,c.created_at createdAt,domain_json domainJson,tagline_json taglineJson,summary_json summaryJson,
   background_json backgroundJson,ultimate_goal_json ultimateGoalJson,record_info_json recordJson,record_history_json recordHistoryJson,
   rules_json rulesJson,scoring_metric_json scoringMetricJson,verification_method_json verificationMethodJson,
-  contribution_criteria_json contributionCriteriaJson,'https://github.com/'||github_repo_owner||'/'||github_repo_name githubRepo,
+  contribution_criteria_json contributionCriteriaJson,c.showcase_json showcaseJson,'https://github.com/'||github_repo_owner||'/'||github_repo_name githubRepo,
   '/challenges/'||slug||'/join.txt' joinInstructionsPath,'false' isDemoStatsJson,
   json_object('contributorsCount',(SELECT count(DISTINCT contributor_github_id) FROM contributions WHERE challenge_id=c.id),
     'verifiedContributionsCount',(SELECT count(*) FROM contributions WHERE challenge_id=c.id),

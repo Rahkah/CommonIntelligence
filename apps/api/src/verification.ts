@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { CONTRIBUTION_TYPES } from '@common-intelligence/shared';
-import { type App, sql, utf8, hex, required, fail, field, key, id, now } from './core';
+import { CONTRIBUTION_TYPES, type Challenge } from '@common-intelligence/shared';
+import { type App, sql, utf8, hex, required, fail, field, key, id, now, unpack } from './core';
+import { syncChallengeShowcaseFromRepo } from './public';
+import * as view from './selects';
 
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
 const repoName = z.string().regex(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/);
@@ -263,6 +265,21 @@ hooks.post('/webhooks/github', async (c) => {
       number ?? null
     ).all<{ task_id: string }>();
     for (const row of rows.results) await reconcile(db, row.task_id);
+  }
+  // Automatically validate & publish updated repo showcase when a PR merges to the default branch.
+  if (config && type === 'pull_request' && b.action === 'closed' && number) {
+    const parsedPr = mergedSchema.safeParse(b.pull_request);
+    if (parsedPr.success && parsedPr.data.base.ref === b.repository.default_branch) {
+      const chRow = await sql(
+        db,
+        view.challenges + " WHERE c.github_repo_owner||'/'||c.github_repo_name=?",
+        repo
+      ).first<Record<string, unknown>>();
+      if (chRow) {
+        const ch = unpack<Challenge>(chRow);
+        await syncChallengeShowcaseFromRepo(db, ch, parsedPr.data.merge_commit_sha).catch(() => {});
+      }
+    }
   }
   return c.json({ processed: writes.length > 0 });
 });

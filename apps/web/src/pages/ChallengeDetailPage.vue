@@ -23,6 +23,8 @@ import {
 } from 'lucide-vue-next';
 import ContributionLineageGraph from '@/components/ContributionLineageGraph.vue';
 import AgentJoinPrompt from '@/components/AgentJoinPrompt.vue';
+import ProjectPhaseRoadmap from '@/components/ProjectPhaseRoadmap.vue';
+import ProjectShowcasePanel from '@/components/ProjectShowcasePanel.vue';
 import RecordProgressionChart from '@/components/RecordProgressionChart.vue';
 import StatusPill from '@/components/StatusPill.vue';
 import { apiClient } from '@/api/client';
@@ -100,6 +102,7 @@ const filteredTasks = computed(() =>
 
 function detectTaskPhase(task: Task): number | null {
   const title = `${task.title.zh} ${task.title.en}`;
+  if (/阶段零|阶段0|Phase\s*0\b/i.test(title)) return 0;
   if (/阶段一|Phase\s*1\b/i.test(title)) return 1;
   if (/阶段二|Phase\s*2\b/i.test(title)) return 2;
   if (/阶段三|Phase\s*3\b/i.test(title)) return 3;
@@ -121,16 +124,18 @@ const groupedTasks = computed(() => {
   }
   const groups: Array<{ key: string; heading: string | null; items: Task[] }> = [];
   const zhNames: Record<number, string> = {
-    1: '第一阶段 · 最小可运行版本（MVP）',
-    2: '第二阶段 · 核心能力进阶',
-    3: '第三阶段 · 极限优化与里程碑发布',
+    0: '第零阶段 · 项目初始化与实时成果展示（Phase 0）',
+    1: '第一阶段 · 基础能力与核心算法优化',
+    2: '第二阶段 · 棋力与计算效率进阶',
+    3: '第三阶段 · 极限优化与里程碑挑战',
   };
   const enNames: Record<number, string> = {
-    1: 'Phase 1 · Runnable MVP',
-    2: 'Phase 2 · Core Capabilities',
-    3: 'Phase 3 · Optimization & Release',
+    0: 'Phase 0 · Project Foundation & Live Showcase',
+    1: 'Phase 1 · Core Capabilities & Optimization',
+    2: 'Phase 2 · Scaling & Performance',
+    3: 'Phase 3 · Benchmark Challenge & Release',
   };
-  for (const phase of [1, 2, 3]) {
+  for (const phase of [0, 1, 2, 3]) {
     const items = buckets.get(phase);
     if (items && items.length > 0) {
       groups.push({
@@ -491,6 +496,16 @@ async function submitTaskProposal() {
 
       <!-- TAB 1: Overview & Rules -->
       <section v-if="activeTab === 'overview'" class="mt-8 space-y-10">
+        <!-- Universal Repo-Driven Live Showcase Container -->
+        <ProjectShowcasePanel
+          :challenge="challenge"
+          :contributions="contributions"
+          @join-agent="focusAgentAccess"
+        />
+
+        <!-- Project Phase Goals & Initialization Workflow -->
+        <ProjectPhaseRoadmap :challenge="challenge" :tasks="tasks" />
+
         <div class="grid gap-8 lg:grid-cols-[1.3fr_0.9fr]">
           <div class="space-y-6">
             <div>

@@ -7,12 +7,13 @@ export const PROJECT_PROPOSAL_LIMITS = {
   goal: 4000,
   scoringMetric: 4000,
   acceptanceCriteria: 4000,
+  visualizationGoal: 2000,
   githubRepo: 300,
 } as const satisfies Record<keyof ProjectBriefContent, number>;
 
 export const PROJECT_BRIEF_SECTIONS = ['summary', 'goal', 'scoringMetric', 'acceptanceCriteria'] as const;
 export const PROJECT_BRIEF_REQUIRED_FIELDS = ['name', 'domain', ...PROJECT_BRIEF_SECTIONS] as const;
-const briefFields = new Set(['schemaVersion', 'githubRepo', ...PROJECT_BRIEF_REQUIRED_FIELDS]);
+const briefFields = new Set(['schemaVersion', 'githubRepo', 'visualizationGoal', ...PROJECT_BRIEF_REQUIRED_FIELDS]);
 
 export type ProjectBriefError =
   | { error: 'briefFormat' | 'briefVersion' }
@@ -34,6 +35,13 @@ export function validateProjectBrief(value: unknown): { data: ProjectBrief } | P
     if (!trimmed || trimmed.length > PROJECT_PROPOSAL_LIMITS[field])
       return { error: 'briefField', field };
     data[field] = trimmed;
+  }
+  if (brief.visualizationGoal != null) {
+    const text = typeof brief.visualizationGoal === 'string' ? brief.visualizationGoal.trim() : '';
+    if (!text || text.length > PROJECT_PROPOSAL_LIMITS.visualizationGoal) {
+      return { error: 'briefField', field: 'visualizationGoal' };
+    }
+    data.visualizationGoal = text;
   }
   if (brief.githubRepo != null) {
     const url = typeof brief.githubRepo === 'string' ? brief.githubRepo.trim() : '';
