@@ -7,21 +7,26 @@ import StatusPill from '@/components/StatusPill.vue';
 import { BADGE_DEFINITIONS } from '@/data/demoData';
 import { useAppState } from '@/stores/appState';
 
-const { t, loc } = useAppState();
+const { state, t, loc } = useAppState();
 </script>
 
 <template>
   <article class="mx-auto max-w-5xl px-4 sm:px-6">
     <!-- 01. Hero -->
     <section aria-labelledby="about-hero-heading" class="pt-14 pb-20 sm:pt-24 sm:pb-28">
-      <div class="max-w-4xl">
+      <div>
         <p class="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-accent dark:text-accent-dark">
           {{ t.about.hero.index }}
         </p>
 
         <h1
           id="about-hero-heading"
-          class="mt-5 font-editorial text-4xl font-normal leading-[1.06] tracking-[-0.025em] text-ink sm:text-6xl lg:text-[4.25rem] dark:text-chalk"
+          class="mt-5 whitespace-nowrap font-editorial font-normal leading-[1.12] tracking-[-0.025em] text-ink dark:text-chalk"
+          :class="
+            state.locale === 'zh'
+              ? 'text-[clamp(1.2rem,5.8vw,3.75rem)]'
+              : 'text-[clamp(0.875rem,4.1vw,2.8rem)]'
+          "
         >
           {{ t.about.hero.headline }}
         </h1>
@@ -43,14 +48,14 @@ const { t, loc } = useAppState();
       aria-labelledby="about-experiment-heading"
       class="border-t border-border-light py-20 sm:py-28 dark:border-border-dark"
     >
-      <div class="grid gap-8 lg:grid-cols-[190px_1fr] lg:gap-14">
+      <div class="grid gap-8 lg:grid-cols-[200px_1fr] lg:gap-14">
         <header class="space-y-1.5">
           <div class="font-mono text-xs text-accent dark:text-accent-dark">
             {{ t.about.experiment.index }}
           </div>
           <h2
             id="about-experiment-heading"
-            class="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink-faint dark:text-chalk-faint"
+            class="font-mono text-[11px] font-medium uppercase tracking-[0.11em] text-ink-faint dark:text-chalk-faint"
           >
             {{ t.about.experiment.label }}
           </h2>
@@ -95,14 +100,14 @@ const { t, loc } = useAppState();
       aria-labelledby="about-how-heading"
       class="border-t border-border-light py-20 sm:py-28 dark:border-border-dark"
     >
-      <div class="grid gap-8 lg:grid-cols-[190px_1fr] lg:gap-14">
+      <div class="grid gap-8 lg:grid-cols-[200px_1fr] lg:gap-14">
         <header class="space-y-1.5">
           <div class="font-mono text-xs text-accent dark:text-accent-dark">
             {{ t.about.howItWorks.index }}
           </div>
           <h2
             id="about-how-heading"
-            class="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink-faint dark:text-chalk-faint"
+            class="font-mono text-[11px] font-medium uppercase tracking-[0.11em] text-ink-faint dark:text-chalk-faint"
           >
             {{ t.about.howItWorks.label }}
           </h2>
@@ -125,27 +130,32 @@ const { t, loc } = useAppState();
       aria-labelledby="about-honors-heading"
       class="border-t border-border-light py-20 sm:py-28 dark:border-border-dark"
     >
-      <div class="grid gap-8 lg:grid-cols-[190px_1fr] lg:gap-14">
+      <div class="grid gap-8 lg:grid-cols-[200px_1fr] lg:gap-14">
         <header class="space-y-1.5">
           <div class="font-mono text-xs text-accent dark:text-accent-dark">
             {{ t.about.honors.index }}
           </div>
           <h2
             id="about-honors-heading"
-            class="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink-faint dark:text-chalk-faint"
+            class="font-mono text-[11px] font-medium uppercase tracking-[0.11em] text-ink-faint dark:text-chalk-faint"
           >
             {{ t.about.honors.label }}
           </h2>
         </header>
 
-        <div class="space-y-12">
-          <div class="max-w-2xl space-y-5">
+        <div class="min-w-0 space-y-12">
+          <div class="space-y-5">
             <h3
-              class="font-editorial text-3xl font-normal leading-[1.15] tracking-tight text-ink sm:text-4xl dark:text-chalk"
+              class="whitespace-nowrap font-editorial font-normal leading-[1.18] tracking-tight text-ink dark:text-chalk"
+              :class="
+                state.locale === 'zh'
+                  ? 'text-[clamp(1.25rem,5.4vw,2.45rem)]'
+                  : 'text-[clamp(1rem,4.1vw,2.15rem)]'
+              "
             >
               {{ t.about.honors.headline }}
             </h3>
-            <p class="text-base leading-[1.85] text-ink-muted sm:text-lg dark:text-chalk-muted">
+            <p class="max-w-2xl text-base leading-[1.85] text-ink-muted sm:text-lg dark:text-chalk-muted">
               {{ t.about.honors.body }}
             </p>
           </div>
@@ -223,25 +233,30 @@ const { t, loc } = useAppState();
       aria-labelledby="about-join-heading"
       class="border-t border-border-light py-24 sm:py-32 dark:border-border-dark"
     >
-      <div class="grid gap-8 lg:grid-cols-[190px_1fr] lg:gap-14">
+      <div class="grid gap-8 lg:grid-cols-[200px_1fr] lg:gap-14">
         <header class="space-y-1.5">
           <div class="font-mono text-xs text-accent dark:text-accent-dark">
             {{ t.about.join.index }}
           </div>
           <h2
             id="about-join-heading"
-            class="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink-faint dark:text-chalk-faint"
+            class="font-mono text-[11px] font-medium uppercase tracking-[0.11em] text-ink-faint dark:text-chalk-faint"
           >
             {{ t.about.join.label }}
           </h2>
         </header>
 
-        <div class="max-w-3xl">
+        <div class="min-w-0">
           <h3
-            class="font-editorial text-4xl font-normal leading-[1.12] tracking-[-0.025em] text-ink sm:text-5xl lg:text-[3.5rem] dark:text-chalk"
+            class="font-editorial font-normal leading-[1.15] tracking-[-0.025em] text-ink dark:text-chalk"
+            :class="
+              state.locale === 'zh'
+                ? 'text-[clamp(1.125rem,5.1vw,2.65rem)]'
+                : 'text-[clamp(1.2rem,5.4vw,3.1rem)]'
+            "
           >
-            <span class="block">{{ t.about.join.headlineLine1 }}</span>
-            <span class="mt-1 block italic text-accent dark:text-accent-dark">
+            <span class="block whitespace-nowrap">{{ t.about.join.headlineLine1 }}</span>
+            <span class="mt-1 block whitespace-nowrap italic text-accent dark:text-accent-dark">
               {{ t.about.join.headlineLine2 }}
             </span>
           </h3>
