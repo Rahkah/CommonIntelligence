@@ -54,6 +54,71 @@ export function parseAllowlist(raw?: string): string[] {
     .filter(Boolean);
 }
 
+function parseIpv4(ip: string): bigint | null {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let value = 0n;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n > 255) return null;
+    value = (value << 8n) | BigInt(n);
+  }
+  return value;
+}
+
+function parseIpv6(ip: string): bigint | null {
+  if (!ip.includes(':')) return null;
+  const halves = ip.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - (left.length + right.length);
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = halves.length === 1 ? left : [...left, ...Array<string>(missing).fill('0'), ...right];
+  let value = 0n;
+  for (const g of groups) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
+    value = (value << 16n) | BigInt(parseInt(g, 16));
+  }
+  return value;
+}
+
+export function isIpAllowed(ip: string | null, allowlist: string[]): boolean {
+  if (!ip || allowlist.length === 0) return false;
+  const normalized = ip.trim().toLowerCase();
+  const ip4 = parseIpv4(normalized);
+  const ip6 = ip4 === null ? parseIpv6(normalized) : null;
+  for (const rawEntry of allowlist) {
+    const entry = rawEntry.trim().toLowerCase();
+    if (!entry) continue;
+    if (entry === normalized) return true;
+    const slash = entry.indexOf('/');
+    if (slash === -1) {
+      const e6 = parseIpv6(entry);
+      if (ip6 !== null && e6 !== null && ip6 === e6) return true;
+      continue;
+    }
+    const base = entry.slice(0, slash);
+    const prefix = Number(entry.slice(slash + 1));
+    if (!Number.isInteger(prefix) || prefix < 0) continue;
+    if (ip4 !== null && prefix <= 32) {
+      const base4 = parseIpv4(base);
+      if (base4 !== null) {
+        const shift = BigInt(32 - prefix);
+        if ((ip4 >> shift) === (base4 >> shift)) return true;
+      }
+    } else if (ip6 !== null && prefix <= 128) {
+      const base6 = parseIpv6(base);
+      if (base6 !== null) {
+        const shift = BigInt(128 - prefix);
+        if ((ip6 >> shift) === (base6 >> shift)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function resolveClientIp(c: Ctx): string | null {
   // Always trust Cloudflare's edge-injected header; never trust spoofable X-Forwarded-For.
   const cfIp = c.req.header('CF-Connecting-IP')?.trim();
@@ -68,7 +133,7 @@ function assertAdminIp(c: Ctx, mutation = false): { ip: string; allowlist: strin
     fail(403, 'FORBIDDEN', 'Admin IP allowlist is not configured.');
   }
   const ip = resolveClientIp(c);
-  if (!ip || !allowlist.includes(ip)) {
+  if (!ip || !isIpAllowed(ip, allowlist)) {
     fail(403, 'FORBIDDEN', 'Access restricted to allowlisted admin IP addresses.');
   }
   if (mutation) {
@@ -94,7 +159,7 @@ adminConsole.get('/admin', (c) => {
   const allowlist = parseAllowlist(c.env.ADMIN_IP_ALLOWLIST);
   const ip = resolveClientIp(c);
   c.header('Cache-Control', 'no-store');
-  if (!allowlist.length || !ip || !allowlist.includes(ip)) {
+  if (!allowlist.length || !ip || !isIpAllowed(ip, allowlist)) {
     return c.text('403 Forbidden — Admin access is restricted by IP allowlist.', 403);
   }
   return c.env.ASSETS.fetch(c.req.raw);

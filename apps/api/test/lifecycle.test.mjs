@@ -782,12 +782,14 @@ it('seeds phased starter task pools and restricts /admin console to allowlisted 
   expect(olTasks.items.map((t) => t.taskId)).toContain('TASK-OL-P3-02');
 
   const prevAllowlist = env.ADMIN_IP_ALLOWLIST;
-  env.ADMIN_IP_ALLOWLIST = '141.11.146.88';
+  env.ADMIN_IP_ALLOWLIST = '141.11.146.88,240e:38d:8d42:d000::/64';
   try {
     expect((await request('/admin', { headers: { 'CF-Connecting-IP': '203.0.113.9' } })).status).toBe(403);
     expect(
       (await request('/api/admin/console/overview', { headers: { 'CF-Connecting-IP': '203.0.113.9' } })).status
     ).toBe(403);
+    expect((await request('/admin', { headers: { 'CF-Connecting-IP': '240e:38d:8d42:d000:78ef:af41:8a17:de32' } })).status).toBe(200);
+    expect((await request('/admin', { headers: { 'CF-Connecting-IP': '240e:38d:8d42:d001::1' } })).status).toBe(403);
 
     expect((await request('/admin', { headers: { 'CF-Connecting-IP': '141.11.146.88' } })).status).toBe(200);
     const overview = await ok(
