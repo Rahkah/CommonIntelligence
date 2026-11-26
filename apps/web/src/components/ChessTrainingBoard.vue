@@ -1,24 +1,37 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
+  CHESS_MAX_GAME_HISTORY,
   CHESS_RESIGN_UCI,
+  type ChessGameEndReason,
+  type ChessHistoricalGame,
   type ChessMatchState,
+  type ChessRoundVoteHistory,
   type Contribution,
   type ProjectShowcase,
 } from '@common-intelligence/shared';
 import {
   ChessBoard,
   MATE_SCORE,
+  START_FEN,
   WHITE,
   evaluateBoard,
   squareToAlgebraic,
 } from '@common-intelligence/grandmaster-engine';
 import {
   Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Clock,
   Eye,
   FastForward,
   Flag,
+  History,
+  ListChecks,
+  Play,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -54,6 +67,9 @@ const match = ref<ChessMatchState | null>(null);
 const loading = ref(true);
 const resolving = ref(false);
 const previewMoveUci = ref<string | null>(null);
+const selectedHistoryGameNumber = ref<number | null>(null);
+const replayPly = ref<number>(0);
+const expandedVoteRound = ref<string | null>(null);
 const countdownText = ref('08:00');
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
@@ -74,13 +90,71 @@ async function loadMatch(silent = false) {
   if (!silent) loading.value = true;
   try {
     match.value = await apiClient.getChessMatch(props.slug);
+    if (
+      selectedHistoryGameNumber.value !== null &&
+      !(match.value.gameHistory ?? []).some((g) => g.gameNumber === selectedHistoryGameNumber.value)
+    ) {
+      selectedHistoryGameNumber.value = null;
+    }
     updateCountdown();
   } finally {
     loading.value = false;
   }
 }
 
-const currentBoard = computed(() => new ChessBoard(match.value?.fen));
+const gameHistory = computed<ChessHistoricalGame[]>(() =>
+  (match.value?.gameHistory ?? []).slice(0, CHESS_MAX_GAME_HISTORY)
+);
+
+const selectedHistoryGame = computed<ChessHistoricalGame | null>(() => {
+  if (selectedHistoryGameNumber.value === null) return null;
+  return gameHistory.value.find((g) => g.gameNumber === selectedHistoryGameNumber.value) ?? null;
+});
+
+const isViewingHistory = computed(() => !props.compact && selectedHistoryGame.value !== null);
+
+const activeVoteHistory = computed<ChessRoundVoteHistory[]>(() => {
+  if (selectedHistoryGame.value) return selectedHistoryGame.value.voteHistory ?? [];
+  return match.value?.voteHistory ?? [];
+});
+
+const activeVoteHistoryGameNumber = computed(
+  () => selectedHistoryGame.value?.gameNumber ?? match.value?.gameNumber ?? 1
+);
+
+const liveBoard = computed(() => new ChessBoard(match.value?.fen));
+
+const replaySnapshot = computed(() => {
+  const histGame = selectedHistoryGame.value;
+  if (!histGame) return null;
+  const board = new ChessBoard(START_FEN);
+  const clampedPly = Math.max(0, Math.min(replayPly.value, histGame.moveHistory.length));
+  let lastBoardMoveUci: string | null = null;
+  let lastEvalCp: number | null = null;
+  for (let i = 0; i < clampedPly; i++) {
+    const mv = histGame.moveHistory[i];
+    if (!mv) break;
+    if (typeof mv.evalWhiteCp === 'number' && Number.isFinite(mv.evalWhiteCp)) {
+      lastEvalCp = mv.evalWhiteCp;
+    }
+    if (mv.uci === CHESS_RESIGN_UCI) continue;
+    const legal = board.findMoveByUci(mv.uci);
+    if (!legal) break;
+    board.makeMove(legal, true);
+    lastBoardMoveUci = mv.uci;
+  }
+  return {
+    board,
+    clampedPly,
+    lastBoardMoveUci,
+    lastEvalCp,
+    atEnd: clampedPly >= histGame.moveHistory.length,
+  };
+});
+
+const currentBoard = computed(() =>
+  isViewingHistory.value && replaySnapshot.value ? replaySnapshot.value.board : liveBoard.value
+);
 
 const positionEval = computed(() => {
   const m = match.value;
@@ -96,8 +170,11 @@ const positionEval = computed(() => {
     };
   }
 
-  if (m.status === 'finished') {
-    if (m.result === '1-0') {
+  const histGame = isViewingHistory.value ? selectedHistoryGame.value : null;
+  const snap = isViewingHistory.value ? replaySnapshot.value : null;
+
+  const evalFinishedResult = (result: string) => {
+    if (result === '1-0') {
       return {
         cp: MATE_SCORE,
         whiteWinPct: 100,
@@ -108,7 +185,7 @@ const positionEval = computed(() => {
         favoredSide: 'white' as const,
       };
     }
-    if (m.result === '0-1') {
+    if (result === '0-1') {
       return {
         cp: -MATE_SCORE,
         whiteWinPct: 0,
@@ -128,22 +205,42 @@ const positionEval = computed(() => {
       signedScore: '0.0',
       favoredSide: 'even' as const,
     };
+  };
+
+  if (histGame && snap) {
+    if (snap.atEnd && histGame.endReason !== 'aborted') {
+      return evalFinishedResult(histGame.result);
+    }
+  } else if (m.status === 'finished') {
+    return evalFinishedResult(m.result);
   }
 
   let cp: number | null = null;
-  for (let i = m.moveHistory.length - 1; i >= 0; i--) {
-    const val = m.moveHistory[i]?.evalWhiteCp;
-    if (typeof val === 'number' && Number.isFinite(val)) {
-      cp = val;
-      break;
+  if (histGame && snap) {
+    cp = snap.lastEvalCp;
+    if (cp === null) {
+      if (snap.clampedPly === 0) {
+        cp = 0;
+      } else {
+        const sideScore = evaluateBoard(snap.board);
+        cp = snap.board.sideToMove === WHITE ? sideScore : -sideScore;
+      }
     }
-  }
-  if (cp === null) {
-    if (m.moveHistory.length === 0) {
-      cp = 0;
-    } else {
-      const sideScore = evaluateBoard(currentBoard.value);
-      cp = currentBoard.value.sideToMove === WHITE ? sideScore : -sideScore;
+  } else {
+    for (let i = m.moveHistory.length - 1; i >= 0; i--) {
+      const val = m.moveHistory[i]?.evalWhiteCp;
+      if (typeof val === 'number' && Number.isFinite(val)) {
+        cp = val;
+        break;
+      }
+    }
+    if (cp === null) {
+      if (m.moveHistory.length === 0) {
+        cp = 0;
+      } else {
+        const sideScore = evaluateBoard(currentBoard.value);
+        cp = currentBoard.value.sideToMove === WHITE ? sideScore : -sideScore;
+      }
     }
   }
 
@@ -209,6 +306,7 @@ const formatVoteLabel = (moveUci: string, moveSan: string) =>
   moveUci === CHESS_RESIGN_UCI ? L('Resign', '投降') : moveSan;
 
 const previewingResign = computed(() => {
+  if (isViewingHistory.value) return null;
   const uci = previewMoveUci.value ?? activeTally.value?.moveUci;
   if (uci !== CHESS_RESIGN_UCI) return null;
   const tally = match.value?.tallies.find((t) => t.moveUci === CHESS_RESIGN_UCI) ?? null;
@@ -226,15 +324,16 @@ const resignedGame = computed(() => {
 });
 
 const previewMoveInfo = computed(() => {
+  if (isViewingHistory.value) return null;
   const uci = previewMoveUci.value ?? activeTally.value?.moveUci;
   if (!uci || uci === CHESS_RESIGN_UCI) return null;
-  const move = currentBoard.value.findMoveByUci(uci);
+  const move = liveBoard.value.findMoveByUci(uci);
   if (!move) return null;
   const tally = match.value?.tallies.find((t) => t.moveUci === uci) ?? null;
   const leading = match.value?.tallies[0]?.moveUci === uci;
   const fromAlg = squareToAlgebraic(move.from);
   const toAlg = squareToAlgebraic(move.to);
-  const movingPiece = move.promotion ? move.promotion : (currentBoard.value.squares[move.from] ?? 0);
+  const movingPiece = move.promotion ? move.promotion : (liveBoard.value.squares[move.from] ?? 0);
   return {
     uci,
     san: tally?.moveSan ?? uci,
@@ -300,7 +399,7 @@ const previewArrow = computed(() => {
 const topMoveCoords = computed(() => {
   const top = match.value?.tallies[0];
   if (!top || top.moveUci === CHESS_RESIGN_UCI) return { from: -1, to: -1 };
-  const m = currentBoard.value.findMoveByUci(top.moveUci);
+  const m = liveBoard.value.findMoveByUci(top.moveUci);
   return m ? { from: m.from, to: m.to } : { from: -1, to: -1 };
 });
 
@@ -310,19 +409,91 @@ const compactTopArrow = computed(() => {
 });
 
 function selectPreviewMove(moveUci: string) {
+  if (isViewingHistory.value) {
+    selectedHistoryGameNumber.value = null;
+  }
   previewMoveUci.value = moveUci;
 }
 
+function selectHistoricalGame(game: ChessHistoricalGame) {
+  if (selectedHistoryGameNumber.value === game.gameNumber) {
+    selectedHistoryGameNumber.value = null;
+    return;
+  }
+  selectedHistoryGameNumber.value = game.gameNumber;
+  replayPly.value = game.moveHistory.length;
+  previewMoveUci.value = null;
+}
+
+function exitHistoryReplay() {
+  selectedHistoryGameNumber.value = null;
+}
+
+function jumpReplay(ply: number) {
+  const max = selectedHistoryGame.value?.moveHistory.length ?? 0;
+  replayPly.value = Math.max(0, Math.min(ply, max));
+}
+
+function stepReplay(delta: number) {
+  jumpReplay(replayPly.value + delta);
+}
+
+function voteRoundKey(gameNumber: number, roundNumber: number): string {
+  return `${gameNumber}:${roundNumber}`;
+}
+
+function isVoteRoundExpanded(gameNumber: number, roundNumber: number): boolean {
+  return expandedVoteRound.value === voteRoundKey(gameNumber, roundNumber);
+}
+
+function toggleVoteRound(gameNumber: number, roundNumber: number) {
+  const key = voteRoundKey(gameNumber, roundNumber);
+  expandedVoteRound.value = expandedVoteRound.value === key ? null : key;
+}
+
+function formatEndReason(reason: ChessGameEndReason): string {
+  if (reason === 'resign') return L('Resigned', '投降');
+  if (reason === 'checkmate') return L('Checkmate', '将杀');
+  if (reason === 'draw') return L('Draw', '和棋');
+  return L('Reset', '中止');
+}
+
+function resultBadgeClass(result: string): string {
+  if (result === '1-0') {
+    return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300';
+  }
+  if (result === '0-1') {
+    return 'bg-rose-500/15 text-rose-700 dark:text-rose-300';
+  }
+  if (result === '1/2-1/2') {
+    return 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
+  }
+  return 'bg-subtle text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted';
+}
+
+function formatShortTime(isoStr?: string | null): string {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${mm}-${dd} ${hh}:${min}`;
+}
+
 const lastMoveCoords = computed(() => {
-  const hist = match.value?.moveHistory ?? [];
-  const last = hist[hist.length - 1];
-  if (!last || !/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(last.uci)) return { from: -1, to: -1 };
+  const lastUci =
+    isViewingHistory.value && replaySnapshot.value
+      ? replaySnapshot.value.lastBoardMoveUci
+      : (match.value?.moveHistory?.[match.value.moveHistory.length - 1]?.uci ?? null);
+  if (!lastUci || !/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(lastUci)) return { from: -1, to: -1 };
   const parseSq = (alg: string) => {
     const file = alg.charCodeAt(0) - 97;
     const rank = Number(alg[1]) - 1;
     return rank * 8 + file;
   };
-  return { from: parseSq(last.uci.slice(0, 2)), to: parseSq(last.uci.slice(2, 4)) };
+  return { from: parseSq(lastUci.slice(0, 2)), to: parseSq(lastUci.slice(2, 4)) };
 });
 
 function squareBgClass(sq: number, isLight: boolean): string {
@@ -351,14 +522,26 @@ const boardCells = computed(() => {
   return cells;
 });
 
+const displayedMoveHistory = computed(() =>
+  isViewingHistory.value && selectedHistoryGame.value
+    ? selectedHistoryGame.value.moveHistory
+    : (match.value?.moveHistory ?? [])
+);
+
 const moveRows = computed(() => {
-  const hist = match.value?.moveHistory ?? [];
-  const rows: Array<{ moveNo: number; white?: string; black?: string }> = [];
+  const hist = displayedMoveHistory.value;
+  const rows: Array<{
+    moveNo: number;
+    white?: { san: string; uci: string; ply: number };
+    black?: { san: string; uci: string; ply: number };
+  }> = [];
   for (let i = 0; i < hist.length; i += 2) {
+    const w = hist[i];
+    const b = hist[i + 1];
     rows.push({
       moveNo: Math.floor(i / 2) + 1,
-      white: hist[i]?.san,
-      black: hist[i + 1]?.san,
+      white: w ? { san: w.san, uci: w.uci, ply: i + 1 } : undefined,
+      black: b ? { san: b.san, uci: b.uci, ply: i + 2 } : undefined,
     });
   }
   return rows;
@@ -399,6 +582,7 @@ async function triggerResolveRound() {
 async function startNextGame() {
   match.value = await apiClient.startNewChessGame(props.slug);
   previewMoveUci.value = null;
+  selectedHistoryGameNumber.value = null;
   updateCountdown();
   notify(L(`Started Game #${match.value.gameNumber}!`, `已开启第 ${match.value.gameNumber} 局！`));
 }
@@ -803,9 +987,84 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <!-- Historical Game Replay Strip & Step Controls -->
+        <div
+          v-if="isViewingHistory && selectedHistoryGame"
+          data-history-replay-banner
+          class="max-w-[504px] space-y-2 rounded-xl border border-indigo-500/45 bg-indigo-500/[0.08] p-3 text-xs dark:border-indigo-400/40 dark:bg-indigo-400/[0.10]"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <span class="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                <History class="h-3 w-3" />
+                {{ L(`Replay · Game #${selectedHistoryGame.gameNumber}`, `历史复盘 · 第 ${selectedHistoryGame.gameNumber} 局`) }}
+              </span>
+              <span
+                class="rounded-full px-2 py-0.5 font-mono text-[10px] font-bold"
+                :class="resultBadgeClass(selectedHistoryGame.result)"
+              >
+                {{ selectedHistoryGame.result }} · {{ formatEndReason(selectedHistoryGame.endReason) }}
+              </span>
+            </div>
+            <button
+              type="button"
+              data-exit-history-replay
+              class="rounded-md border border-border-light bg-surface px-2.5 py-1 text-[11px] font-semibold text-ink transition hover:border-accent dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
+              @click="exitHistoryReplay"
+            >
+              {{ L('Back to Live Game', '返回当前对局') }}
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-1">
+              <button
+                type="button"
+                class="rounded-md border border-border-light bg-surface p-1 text-ink-muted hover:text-ink disabled:opacity-40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted cursor-pointer"
+                :disabled="replayPly <= 0"
+                :title="L('Start', '开局')"
+                @click="jumpReplay(0)"
+              >
+                <ChevronsLeft class="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                data-replay-prev
+                class="rounded-md border border-border-light bg-surface p-1 text-ink-muted hover:text-ink disabled:opacity-40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted cursor-pointer"
+                :disabled="replayPly <= 0"
+                :title="L('Previous move', '上一步')"
+                @click="stepReplay(-1)"
+              >
+                <ChevronLeft class="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                data-replay-next
+                class="rounded-md border border-border-light bg-surface p-1 text-ink-muted hover:text-ink disabled:opacity-40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted cursor-pointer"
+                :disabled="replayPly >= selectedHistoryGame.moveHistory.length"
+                :title="L('Next move', '下一步')"
+                @click="stepReplay(1)"
+              >
+                <ChevronRight class="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                class="rounded-md border border-border-light bg-surface p-1 text-ink-muted hover:text-ink disabled:opacity-40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted cursor-pointer"
+                :disabled="replayPly >= selectedHistoryGame.moveHistory.length"
+                :title="L('Final position', '终局')"
+                @click="jumpReplay(selectedHistoryGame.moveHistory.length)"
+              >
+                <ChevronsRight class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <span class="font-mono text-[11px] font-semibold text-ink-muted dark:text-chalk-muted">
+              {{ L(`Ply ${replayPly} / ${selectedHistoryGame.moveHistory.length}`, `第 ${replayPly} / ${selectedHistoryGame.moveHistory.length} 步`) }}
+            </span>
+          </div>
+        </div>
+
         <!-- Resign Vote Preview Strip -->
         <div
-          v-if="previewingResign && match.status === 'playing'"
+          v-else-if="previewingResign && match.status === 'playing'"
           data-resign-preview
           class="flex max-w-[504px] flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-500/45 bg-rose-500/[0.08] px-3.5 py-2 text-xs dark:border-rose-400/40 dark:bg-rose-400/[0.10]"
         >
@@ -1079,20 +1338,312 @@ onBeforeUnmount(() => {
         <!-- Compact Move History -->
         <div class="rounded-xl border border-border-light bg-paper p-3.5 dark:border-border-dark dark:bg-obsidian">
           <div class="mb-2 flex items-center justify-between text-xs">
-            <span class="font-semibold text-ink dark:text-chalk">{{ L('Match Moves', '本局棋谱') }}</span>
-            <span class="font-mono text-ink-faint dark:text-chalk-faint">{{ match.moveHistory.length }} plies</span>
+            <span class="font-semibold text-ink dark:text-chalk">
+              {{
+                isViewingHistory && selectedHistoryGame
+                  ? L(`Game #${selectedHistoryGame.gameNumber} Moves`, `第 ${selectedHistoryGame.gameNumber} 局棋谱`)
+                  : L('Match Moves', '本局棋谱')
+              }}
+            </span>
+            <span class="font-mono text-ink-faint dark:text-chalk-faint">
+              {{ displayedMoveHistory.length }} {{ L('plies', '步') }}
+            </span>
           </div>
           <div class="flex max-h-[96px] flex-wrap gap-x-3 gap-y-1 overflow-y-auto font-mono text-xs">
             <span v-if="moveRows.length === 0" class="text-ink-faint dark:text-chalk-faint">
               {{ L('Waiting for Round 1…', '等待第 1 回合落子…') }}
             </span>
-            <span v-for="row in moveRows" :key="row.moveNo" class="text-ink dark:text-chalk">
+            <span v-for="row in moveRows" :key="row.moveNo" class="inline-flex items-center gap-1 text-ink dark:text-chalk">
               <span class="text-ink-faint dark:text-chalk-faint">{{ row.moveNo }}.</span>
-              {{ row.white }}<template v-if="row.black"> {{ row.black }}</template>
+              <button
+                v-if="row.white && isViewingHistory"
+                type="button"
+                class="cursor-pointer rounded px-1 py-0.5 transition"
+                :class="
+                  replayPly === row.white.ply
+                    ? 'bg-indigo-600 font-bold text-white'
+                    : 'hover:bg-subtle dark:hover:bg-obsidian-subtle'
+                "
+                @click="jumpReplay(row.white.ply)"
+              >
+                {{ formatVoteLabel(row.white.uci, row.white.san) }}
+              </button>
+              <span v-else-if="row.white">{{ formatVoteLabel(row.white.uci, row.white.san) }}</span>
+              <button
+                v-if="row.black && isViewingHistory"
+                type="button"
+                class="cursor-pointer rounded px-1 py-0.5 transition"
+                :class="
+                  replayPly === row.black.ply
+                    ? 'bg-indigo-600 font-bold text-white'
+                    : 'hover:bg-subtle dark:hover:bg-obsidian-subtle'
+                "
+                @click="jumpReplay(row.black.ply)"
+              >
+                {{ row.black.san }}
+              </button>
+              <span v-else-if="row.black">{{ row.black.san }}</span>
             </span>
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- Historical Votes & Historical Games (Max 10 Games) -->
+    <div v-if="match" class="grid gap-4 lg:grid-cols-2">
+      <!-- Voting History Panel -->
+      <section
+        data-chess-vote-history
+        class="rounded-xl border border-border-light bg-paper p-4 dark:border-border-dark dark:bg-obsidian"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <ListChecks class="h-4 w-4 text-accent dark:text-accent-dark" />
+            <h3 class="text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-chalk-muted">
+              {{ L('Voting History', '历史投票') }}
+            </h3>
+            <span class="rounded-full bg-subtle px-2 py-0.5 font-mono text-[10px] font-semibold text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted">
+              {{ L(`Game #${activeVoteHistoryGameNumber}`, `第 ${activeVoteHistoryGameNumber} 局`) }}
+            </span>
+          </div>
+          <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+            {{ activeVoteHistory.length }} {{ L('rounds', '回合') }}
+          </span>
+        </div>
+
+        <div
+          v-if="activeVoteHistory.length === 0"
+          class="py-6 text-center text-xs text-ink-faint dark:text-chalk-faint"
+        >
+          {{ L('No resolved voting rounds yet in this game.', '本局暂无已结算的历史投票记录。') }}
+        </div>
+
+        <ul v-else class="mt-3 max-h-[340px] space-y-2 overflow-y-auto pr-1">
+          <li
+            v-for="round in activeVoteHistory"
+            :key="`${activeVoteHistoryGameNumber}-${round.roundNumber}`"
+            data-vote-history-round
+            class="rounded-lg border border-border-light bg-surface p-3 text-xs dark:border-border-dark dark:bg-obsidian-surface"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="rounded bg-subtle px-1.5 py-0.5 font-mono text-[10px] font-bold text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted">
+                  {{ L(`R${round.roundNumber}`, `第 ${round.roundNumber} 回合`) }}
+                </span>
+                <span
+                  v-if="round.winningMoveSan"
+                  class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[11px] font-bold"
+                  :class="
+                    round.winningMoveUci && isResignTally(round.winningMoveUci)
+                      ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                      : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                  "
+                >
+                  {{
+                    round.winningMoveUci
+                      ? formatVoteLabel(round.winningMoveUci, round.winningMoveSan)
+                      : round.winningMoveSan
+                  }}
+                </span>
+                <span
+                  v-if="round.stockfishReplySan"
+                  class="font-mono text-[11px] text-ink-muted dark:text-chalk-muted"
+                >
+                  → {{ round.stockfishReplySan }}
+                </span>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
+                  {{ round.totalVotes }} {{ L('votes', '票') }}
+                </span>
+                <button
+                  v-if="round.votes.length > 0"
+                  type="button"
+                  data-vote-history-toggle
+                  class="inline-flex items-center gap-0.5 rounded border border-border-light bg-paper px-1.5 py-0.5 text-[10px] font-medium text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted cursor-pointer"
+                  :aria-expanded="isVoteRoundExpanded(activeVoteHistoryGameNumber, round.roundNumber)"
+                  @click="toggleVoteRound(activeVoteHistoryGameNumber, round.roundNumber)"
+                >
+                  <span>
+                    {{
+                      isVoteRoundExpanded(activeVoteHistoryGameNumber, round.roundNumber)
+                        ? L('Hide', '收起')
+                        : L('Details', '详情')
+                    }}
+                  </span>
+                  <ChevronDown
+                    class="h-3 w-3 transition-transform"
+                    :class="{ 'rotate-180': isVoteRoundExpanded(activeVoteHistoryGameNumber, round.roundNumber) }"
+                  />
+                </button>
+              </div>
+            </div>
+
+            <!-- Compact Tally Breakdown Pills -->
+            <div v-if="round.tallies.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+              <span
+                v-for="(t, tIdx) in round.tallies.slice(0, 4)"
+                :key="t.moveUci"
+                class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[10.5px]"
+                :class="
+                  tIdx === 0
+                    ? isResignTally(t.moveUci)
+                      ? 'bg-rose-500/12 font-semibold text-rose-700 dark:text-rose-300'
+                      : 'bg-amber-500/12 font-semibold text-amber-800 dark:text-amber-300'
+                    : 'bg-subtle text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted'
+                "
+              >
+                <span>{{ formatVoteLabel(t.moveUci, t.moveSan) }}</span>
+                <span class="opacity-80">{{ t.votes }} ({{ t.percentage }}%)</span>
+              </span>
+            </div>
+
+            <!-- Expanded Per-Agent Vote Pitches -->
+            <ul
+              v-if="isVoteRoundExpanded(activeVoteHistoryGameNumber, round.roundNumber) && round.votes.length > 0"
+              class="mt-2.5 space-y-1.5 border-t border-border-light pt-2 dark:border-border-dark"
+            >
+              <li
+                v-for="v in round.votes"
+                :key="`${round.roundNumber}-${v.voterKey}-${v.createdAt}`"
+                class="rounded-md bg-paper px-2.5 py-1.5 text-[11px] dark:bg-obsidian"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-1.5">
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <span class="truncate font-mono font-semibold text-ink dark:text-chalk">@{{ v.authorUsername }}</span>
+                    <span
+                      v-if="v.agentModel"
+                      class="rounded bg-subtle px-1 py-0.5 font-mono text-[9.5px] text-accent dark:bg-obsidian-subtle dark:text-accent-dark"
+                    >
+                      {{ v.agentModel }}
+                    </span>
+                  </div>
+                  <span
+                    class="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold"
+                    :class="
+                      isResignTally(v.moveUci)
+                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                        : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                    "
+                  >
+                    {{ formatVoteLabel(v.moveUci, v.moveSan) }}
+                  </span>
+                </div>
+                <p v-if="v.reason" class="mt-1 leading-snug text-ink-muted dark:text-chalk-muted">
+                  {{ v.reason }}
+                </p>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Game History Panel (Capped at 10 Games) -->
+      <section
+        data-chess-game-history
+        class="rounded-xl border border-border-light bg-paper p-4 dark:border-border-dark dark:bg-obsidian"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <History class="h-4 w-4 text-accent dark:text-accent-dark" />
+            <h3 class="text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-chalk-muted">
+              {{ L('Game History', '历史对局') }}
+            </h3>
+          </div>
+          <span
+            data-game-history-count
+            class="rounded-full bg-subtle px-2 py-0.5 font-mono text-[10.5px] font-semibold text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted"
+          >
+            {{ L(`${gameHistory.length} / ${CHESS_MAX_GAME_HISTORY} saved`, `已保存 ${gameHistory.length} / ${CHESS_MAX_GAME_HISTORY} 局`) }}
+          </span>
+        </div>
+
+        <div
+          v-if="gameHistory.length === 0"
+          class="py-6 text-center text-xs text-ink-faint dark:text-chalk-faint"
+        >
+          {{
+            L(
+              `No finished games yet — up to the latest ${CHESS_MAX_GAME_HISTORY} games are archived automatically.`,
+              `暂无历史对局记录——对局结束后将自动保存，最多保留最近 ${CHESS_MAX_GAME_HISTORY} 局。`
+            )
+          }}
+        </div>
+
+        <ul v-else class="mt-3 max-h-[340px] space-y-2 overflow-y-auto pr-1">
+          <li
+            v-for="game in gameHistory"
+            :key="game.gameNumber"
+            data-game-history-item
+            class="rounded-lg border p-3 text-xs transition"
+            :class="
+              selectedHistoryGameNumber === game.gameNumber
+                ? 'border-indigo-500/70 bg-indigo-500/[0.08] ring-1 ring-indigo-500/30 dark:border-indigo-400/70 dark:bg-indigo-400/[0.12]'
+                : 'border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface'
+            "
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="font-mono text-xs font-bold text-ink dark:text-chalk">
+                  {{ L(`Game #${game.gameNumber}`, `第 ${game.gameNumber} 局`) }}
+                </span>
+                <span
+                  class="rounded-full px-2 py-0.5 font-mono text-[10.5px] font-bold"
+                  :class="resultBadgeClass(game.result)"
+                >
+                  {{ game.result }}
+                </span>
+                <span class="rounded bg-subtle px-1.5 py-0.5 text-[10px] font-medium text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted">
+                  {{ formatEndReason(game.endReason) }}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                :data-replay-game="game.gameNumber"
+                class="inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition"
+                :class="
+                  selectedHistoryGameNumber === game.gameNumber
+                    ? 'border-indigo-600 bg-indigo-600 text-white'
+                    : 'border-border-light bg-paper text-ink hover:border-accent dark:border-border-dark dark:bg-obsidian dark:text-chalk'
+                "
+                @click="selectHistoricalGame(game)"
+              >
+                <Play class="h-3 w-3" />
+                <span>
+                  {{
+                    selectedHistoryGameNumber === game.gameNumber
+                      ? L('Viewing', '复盘中')
+                      : L('Replay', '复盘')
+                  }}
+                </span>
+              </button>
+            </div>
+
+            <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
+              <span>{{ game.totalPlies }} {{ L('plies', '步') }}</span>
+              <span>{{ game.totalRounds }} {{ L('rounds', '回合') }}</span>
+              <span>{{ game.totalVotes }} {{ L('votes', '票') }}</span>
+              <span v-if="formatShortTime(game.finishedAt)" class="text-ink-faint dark:text-chalk-faint">
+                {{ formatShortTime(game.finishedAt) }}
+              </span>
+            </div>
+
+            <div
+              v-if="game.moveHistory.length > 0"
+              class="mt-1.5 truncate font-mono text-[11px] text-ink-faint dark:text-chalk-faint"
+            >
+              {{
+                game.moveHistory
+                  .slice(0, 10)
+                  .map((m, idx) => (idx % 2 === 0 ? `${Math.floor(idx / 2) + 1}.${formatVoteLabel(m.uci, m.san)}` : m.san))
+                  .join(' ')
+              }}<template v-if="game.moveHistory.length > 10"> …</template>
+            </div>
+          </li>
+        </ul>
+      </section>
     </div>
   </div>
 </template>

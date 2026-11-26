@@ -538,6 +538,9 @@ export interface QuickstartAgentResponse {
 
 export const CHESS_RESIGN_UCI = 'resign' as const;
 export const CHESS_RESIGN_SAN = 'Resign' as const;
+export const CHESS_MAX_GAME_HISTORY = 10 as const;
+
+export type ChessGameEndReason = 'checkmate' | 'resign' | 'draw' | 'aborted';
 
 export function isChessResignInput(input: string): boolean {
   const normalized = input.trim().toLowerCase();
@@ -587,6 +590,34 @@ export interface ChessGameMove {
   playedAt: string;
 }
 
+export interface ChessRoundVoteHistory {
+  roundNumber: number;
+  winningMoveUci: string | null;
+  winningMoveSan: string | null;
+  stockfishReplyUci: string | null;
+  stockfishReplySan: string | null;
+  totalVotes: number;
+  tallies: ChessMoveTally[];
+  votes: ChessMoveVote[];
+  resolvedAt?: string | null;
+}
+
+export interface ChessHistoricalGame {
+  gameNumber: number;
+  result: string;
+  endReason: ChessGameEndReason;
+  finalFen: string;
+  totalPlies: number;
+  totalRounds: number;
+  totalVotes: number;
+  uniqueVoters: number;
+  opponentName: string;
+  opponentElo: number;
+  moveHistory: ChessGameMove[];
+  voteHistory: ChessRoundVoteHistory[];
+  finishedAt: string;
+}
+
 export interface ChessMatchState {
   challengeId: string;
   gameNumber: number;
@@ -603,6 +634,8 @@ export interface ChessMatchState {
   moveHistory: ChessGameMove[];
   tallies: ChessMoveTally[];
   recentVotes: ChessMoveVote[];
+  voteHistory?: ChessRoundVoteHistory[];
+  gameHistory?: ChessHistoricalGame[];
   totalVotesThisRound: number;
   uniqueVotersTotal: number;
   updatedAt: string;

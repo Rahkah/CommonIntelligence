@@ -9,14 +9,18 @@ import {
   type ChessMove,
 } from '@common-intelligence/grandmaster-engine';
 import {
+  CHESS_MAX_GAME_HISTORY,
   CHESS_RESIGN_SAN,
   CHESS_RESIGN_UCI,
   isChessResignInput,
+  type ChessGameEndReason,
   type ChessGameMove,
+  type ChessHistoricalGame,
   type ChessMatchState,
   type ChessMoveOption,
   type ChessMoveTally,
   type ChessMoveVote,
+  type ChessRoundVoteHistory,
 } from '@common-intelligence/shared';
 import { anyBearer, browser } from './auth';
 import { type App, fail, iso, json, now, one, rate, sql } from './core';
@@ -54,6 +58,26 @@ interface VoteRow {
   move_san: string;
   reason: string | null;
   created_at: string;
+}
+
+interface VoteRowWithRound extends VoteRow {
+  round_number: number;
+}
+
+interface HistoricalGameRow {
+  game_number: number;
+  result: string;
+  end_reason: ChessGameEndReason;
+  final_fen: string;
+  total_plies: number;
+  total_rounds: number;
+  total_votes: number;
+  unique_voters: number;
+  opponent_name: string;
+  opponent_elo: number;
+  move_history_json: string;
+  vote_history_json: string;
+  finished_at: string;
 }
 
 export const chess = new Hono<App>();
@@ -171,34 +195,8 @@ function buildTallies(votes: VoteRow[]): ChessMoveTally[] {
     }));
 }
 
-async function buildMatchState(db: D1Database, match: MatchRow): Promise<ChessMatchState> {
-  const board = new ChessBoard(match.fen);
-  const legalMoves =
-    match.status === 'playing'
-      ? listLegalMoveOptions(board).map(({ uci, san }) => ({ uci, san }))
-      : [];
-  const specialActions: ChessMoveOption[] =
-    match.status === 'playing' ? [{ uci: CHESS_RESIGN_UCI, san: CHESS_RESIGN_SAN }] : [];
-
-  const [roundVotesRes, uniqueRes] = await db.batch<Record<string, unknown>>([
-    sql(
-      db,
-      `SELECT voter_key, author_github_id, author_username, agent_id, agent_model, move_uci, move_san, reason, created_at
-       FROM chess_votes WHERE challenge_id=? AND game_number=? AND round_number=?
-       ORDER BY created_at DESC`,
-      match.challenge_id,
-      match.game_number,
-      match.round_number
-    ),
-    sql(
-      db,
-      `SELECT count(DISTINCT voter_key) n FROM chess_votes WHERE challenge_id=?`,
-      match.challenge_id
-    ),
-  ]);
-
-  const voteRows = roundVotesRes.results as unknown as VoteRow[];
-  const recentVotes: ChessMoveVote[] = voteRows.slice(0, 30).map((v) => ({
+function mapVoteRow(v: VoteRow): ChessMoveVote {
+  return {
     voterKey: v.voter_key,
     authorGithubId: v.author_github_id,
     authorUsername: v.author_username,
@@ -208,14 +206,217 @@ async function buildMatchState(db: D1Database, match: MatchRow): Promise<ChessMa
     moveSan: v.move_san,
     reason: v.reason,
     createdAt: v.created_at,
-  }));
+  };
+}
 
-  let moveHistory: ChessGameMove[] = [];
+function parseJsonArray<T>(raw: string): T[] {
   try {
-    moveHistory = JSON.parse(match.move_history_json) as ChessGameMove[];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
-    moveHistory = [];
+    return [];
   }
+}
+
+function inferEndReason(
+  status: 'playing' | 'finished',
+  result: string,
+  history: ChessGameMove[]
+): ChessGameEndReason {
+  if (status !== 'finished') return 'aborted';
+  if (history[history.length - 1]?.uci === CHESS_RESIGN_UCI) return 'resign';
+  if (result === '1-0' || result === '0-1') return 'checkmate';
+  return 'draw';
+}
+
+function buildVoteHistory(
+  allVotes: VoteRowWithRound[],
+  moveHistory: ChessGameMove[],
+  maxRound: number
+): ChessRoundVoteHistory[] {
+  if (maxRound <= 0) return [];
+  const byRound = new Map<number, VoteRowWithRound[]>();
+  for (const v of allVotes) {
+    if (v.round_number < 1 || v.round_number > maxRound) continue;
+    const list = byRound.get(v.round_number);
+    if (list) list.push(v);
+    else byRound.set(v.round_number, [v]);
+  }
+  const rounds = new Set<number>(byRound.keys());
+  const movedRounds = Math.min(maxRound, Math.ceil(moveHistory.length / 2));
+  for (let r = 1; r <= movedRounds; r++) rounds.add(r);
+
+  return Array.from(rounds)
+    .sort((a, b) => b - a)
+    .map((roundNumber) => {
+      const roundVotes = [...(byRound.get(roundNumber) ?? [])].sort((a, b) =>
+        b.created_at.localeCompare(a.created_at)
+      );
+      const whiteMove = moveHistory[(roundNumber - 1) * 2] ?? null;
+      const blackMove = moveHistory[(roundNumber - 1) * 2 + 1] ?? null;
+      const tallies = buildTallies(roundVotes);
+      return {
+        roundNumber,
+        winningMoveUci: whiteMove?.uci ?? tallies[0]?.moveUci ?? null,
+        winningMoveSan: whiteMove?.san ?? tallies[0]?.moveSan ?? null,
+        stockfishReplyUci: blackMove?.uci ?? null,
+        stockfishReplySan: blackMove?.san ?? null,
+        totalVotes: roundVotes.length,
+        tallies,
+        votes: roundVotes.slice(0, 20).map(mapVoteRow),
+        resolvedAt: whiteMove?.playedAt ?? blackMove?.playedAt ?? roundVotes[0]?.created_at ?? null,
+      };
+    });
+}
+
+async function archiveChessGame(
+  db: D1Database,
+  match: MatchRow,
+  history: ChessGameMove[],
+  endReason: ChessGameEndReason,
+  finishedAt: string
+) {
+  const allVotesRes = await sql(
+    db,
+    `SELECT round_number, voter_key, author_github_id, author_username, agent_id, agent_model, move_uci, move_san, reason, created_at
+     FROM chess_votes WHERE challenge_id=? AND game_number=?
+     ORDER BY round_number DESC, created_at DESC`,
+    match.challenge_id,
+    match.game_number
+  ).all<VoteRowWithRound>();
+
+  const allVotes = allVotesRes.results;
+  const voteHistory = buildVoteHistory(allVotes, history, match.round_number);
+  const uniqueVoters = new Set(allVotes.map((v) => v.voter_key)).size;
+  const totalRounds = Math.max(voteHistory.length, Math.ceil(history.length / 2));
+
+  await db.batch([
+    sql(
+      db,
+      `INSERT INTO chess_game_history(
+         challenge_id, game_number, result, end_reason, final_fen,
+         total_plies, total_rounds, total_votes, unique_voters,
+         opponent_name, opponent_elo, move_history_json, vote_history_json, finished_at
+       )
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(challenge_id, game_number) DO UPDATE SET
+         result=excluded.result,
+         end_reason=excluded.end_reason,
+         final_fen=excluded.final_fen,
+         total_plies=excluded.total_plies,
+         total_rounds=excluded.total_rounds,
+         total_votes=excluded.total_votes,
+         unique_voters=excluded.unique_voters,
+         move_history_json=excluded.move_history_json,
+         vote_history_json=excluded.vote_history_json,
+         finished_at=excluded.finished_at`,
+      match.challenge_id,
+      match.game_number,
+      match.result,
+      endReason,
+      match.fen,
+      history.length,
+      totalRounds,
+      allVotes.length,
+      uniqueVoters,
+      OPPONENT_NAME,
+      OPPONENT_ELO,
+      JSON.stringify(history),
+      JSON.stringify(voteHistory),
+      finishedAt
+    ),
+    sql(
+      db,
+      `DELETE FROM chess_game_history
+       WHERE challenge_id=?
+         AND game_number NOT IN (
+           SELECT game_number FROM chess_game_history
+           WHERE challenge_id=?
+           ORDER BY game_number DESC
+           LIMIT ?
+         )`,
+      match.challenge_id,
+      match.challenge_id,
+      CHESS_MAX_GAME_HISTORY
+    ),
+    sql(
+      db,
+      `DELETE FROM chess_votes
+       WHERE challenge_id=?
+         AND game_number < ?
+         AND game_number NOT IN (
+           SELECT game_number FROM chess_game_history WHERE challenge_id=?
+         )`,
+      match.challenge_id,
+      match.game_number,
+      match.challenge_id
+    ),
+  ]);
+}
+
+async function buildMatchState(db: D1Database, match: MatchRow): Promise<ChessMatchState> {
+  const board = new ChessBoard(match.fen);
+  const legalMoves =
+    match.status === 'playing'
+      ? listLegalMoveOptions(board).map(({ uci, san }) => ({ uci, san }))
+      : [];
+  const specialActions: ChessMoveOption[] =
+    match.status === 'playing' ? [{ uci: CHESS_RESIGN_UCI, san: CHESS_RESIGN_SAN }] : [];
+
+  const [gameVotesRes, uniqueRes, historyGamesRes] = await db.batch<Record<string, unknown>>([
+    sql(
+      db,
+      `SELECT round_number, voter_key, author_github_id, author_username, agent_id, agent_model, move_uci, move_san, reason, created_at
+       FROM chess_votes WHERE challenge_id=? AND game_number=?
+       ORDER BY round_number DESC, created_at DESC`,
+      match.challenge_id,
+      match.game_number
+    ),
+    sql(
+      db,
+      `SELECT count(DISTINCT voter_key) n FROM chess_votes WHERE challenge_id=?`,
+      match.challenge_id
+    ),
+    sql(
+      db,
+      `SELECT game_number, result, end_reason, final_fen, total_plies, total_rounds, total_votes, unique_voters,
+              opponent_name, opponent_elo, move_history_json, vote_history_json, finished_at
+       FROM chess_game_history
+       WHERE challenge_id=?
+       ORDER BY game_number DESC
+       LIMIT ?`,
+      match.challenge_id,
+      CHESS_MAX_GAME_HISTORY
+    ),
+  ]);
+
+  const allGameVotes = gameVotesRes.results as unknown as VoteRowWithRound[];
+  const currentRoundVotes = allGameVotes.filter((v) => v.round_number === match.round_number);
+  const recentVotes: ChessMoveVote[] = currentRoundVotes.slice(0, 30).map(mapVoteRow);
+  const moveHistory = parseJsonArray<ChessGameMove>(match.move_history_json);
+  const voteHistory = buildVoteHistory(
+    allGameVotes,
+    moveHistory,
+    match.status === 'finished' ? match.round_number : match.round_number - 1
+  );
+
+  const gameHistory: ChessHistoricalGame[] = (
+    historyGamesRes.results as unknown as HistoricalGameRow[]
+  ).map((g) => ({
+    gameNumber: Number(g.game_number),
+    result: g.result,
+    endReason: g.end_reason,
+    finalFen: g.final_fen,
+    totalPlies: Number(g.total_plies),
+    totalRounds: Number(g.total_rounds),
+    totalVotes: Number(g.total_votes),
+    uniqueVoters: Number(g.unique_voters),
+    opponentName: g.opponent_name,
+    opponentElo: Number(g.opponent_elo),
+    moveHistory: parseJsonArray<ChessGameMove>(g.move_history_json),
+    voteHistory: parseJsonArray<ChessRoundVoteHistory>(g.vote_history_json),
+    finishedAt: g.finished_at,
+  }));
 
   return {
     challengeId: match.challenge_id,
@@ -231,9 +432,11 @@ async function buildMatchState(db: D1Database, match: MatchRow): Promise<ChessMa
     legalMoves,
     specialActions,
     moveHistory,
-    tallies: buildTallies(voteRows),
+    tallies: buildTallies(currentRoundVotes),
     recentVotes,
-    totalVotesThisRound: voteRows.length,
+    voteHistory,
+    gameHistory,
+    totalVotesThisRound: currentRoundVotes.length,
     uniqueVotersTotal: Number(uniqueRes.results[0]?.n ?? 0),
     updatedAt: match.updated_at,
     isDemo: false,
@@ -332,14 +535,16 @@ export async function resolveChessRound(
   const nextRound = outcome.finished ? match.round_number : match.round_number + 1;
   const nextDeadline = iso(ROUND_DURATION_MS);
   const updatedAt = iso();
+  const nextFen = board.toFen();
+  const historyJson = JSON.stringify(history);
 
   await sql(
     db,
     `UPDATE chess_matches
      SET fen=?, move_history_json=?, round_number=?, status=?, result=?, round_deadline_at=?, updated_at=?
      WHERE challenge_id=? AND game_number=? AND round_number=?`,
-    board.toFen(),
-    JSON.stringify(history),
+    nextFen,
+    historyJson,
     nextRound,
     nextStatus,
     outcome.result,
@@ -349,6 +554,26 @@ export async function resolveChessRound(
     match.game_number,
     match.round_number
   ).run();
+
+  if (outcome.finished) {
+    const finishedRow: MatchRow = {
+      ...match,
+      fen: nextFen,
+      move_history_json: historyJson,
+      round_number: nextRound,
+      status: 'finished',
+      result: outcome.result,
+      round_deadline_at: nextDeadline,
+      updated_at: updatedAt,
+    };
+    await archiveChessGame(
+      db,
+      finishedRow,
+      history,
+      inferEndReason('finished', outcome.result, history),
+      updatedAt
+    );
+  }
 
   const refreshed = await ensureMatch(db, challengeId);
   return {
@@ -512,6 +737,16 @@ chess.post('/api/chess/:slug/new-game', async (c) => {
   const match = await ensureMatch(db, ch.id);
   if (match.status === 'playing' && principal.role !== 'maintainer' && principal.role !== 'admin') {
     fail(409, 'CONFLICT', 'Current game is still in progress.');
+  }
+  const prevHistory = parseJsonArray<ChessGameMove>(match.move_history_json);
+  if (match.status === 'finished' || prevHistory.length > 0) {
+    await archiveChessGame(
+      db,
+      match,
+      prevHistory,
+      inferEndReason(match.status, match.result, prevHistory),
+      match.status === 'finished' ? match.updated_at : iso()
+    );
   }
   const nextGame = match.game_number + 1;
   await sql(

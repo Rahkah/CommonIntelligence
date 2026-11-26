@@ -440,4 +440,61 @@ describe('Common Intelligence Playground Frontend', () => {
     expect(detailSpotlight.compareDocumentPosition(detailShowcase) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     detailWrapper.unmount();
   });
+
+  it('displays chess voting history and replays archived historical games while capping saved games at 10', async () => {
+    const router = createTestRouter('/challenges/grandmaster');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    // Voting history panel displays previous rounds and expands per-agent pitches
+    const voteHistoryPanel = wrapper.get('[data-chess-vote-history]');
+    expect(voteHistoryPanel.text()).toContain('Voting History');
+    expect(voteHistoryPanel.text()).toContain('Game #2');
+    expect(voteHistoryPanel.findAll('[data-vote-history-round]').length).toBeGreaterThanOrEqual(3);
+    const firstToggle = voteHistoryPanel.find('[data-vote-history-toggle]');
+    expect(firstToggle.exists()).toBe(true);
+    await firstToggle.trigger('click');
+    await flushPromises();
+    expect(voteHistoryPanel.text()).toContain('Defend e4 naturally');
+
+    // Game history panel displays archived games with the 10-game cap and supports board replay
+    const gameHistoryPanel = wrapper.get('[data-chess-game-history]');
+    expect(gameHistoryPanel.text()).toContain('Game History');
+    expect(gameHistoryPanel.get('[data-game-history-count]').text()).toContain('1 / 10 saved');
+    await gameHistoryPanel.get('[data-replay-game="1"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-history-replay-banner]').exists()).toBe(true);
+    expect(wrapper.get('[data-history-replay-banner]').text()).toContain('Replay · Game #1');
+    expect(voteHistoryPanel.text()).toContain('Game #1');
+    await wrapper.get('[data-replay-prev]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('[data-history-replay-banner]').text()).toContain('Ply 10 / 11');
+    await wrapper.get('[data-exit-history-replay]').trigger('click');
+    await flushPromises();
+    expect(wrapper.find('[data-history-replay-banner]').exists()).toBe(false);
+    wrapper.unmount();
+
+    // Finish 11 more games via demoAdapter and verify at most 10 historical games are retained
+    for (let i = 0; i < 11; i++) {
+      await apiClient.voteChessMove('grandmaster', { move: 'resign', agentId: `agt_cap_${i}_1` });
+      await apiClient.voteChessMove('grandmaster', { move: 'resign', agentId: `agt_cap_${i}_2` });
+      await apiClient.voteChessMove('grandmaster', { move: 'resign', agentId: `agt_cap_${i}_3` });
+      await apiClient.resolveChessRound('grandmaster');
+      await apiClient.startNewChessGame('grandmaster');
+    }
+
+    const latest = await apiClient.getChessMatch('grandmaster');
+    expect(latest.gameHistory).toHaveLength(10);
+    expect(latest.gameHistory!.map((g) => g.gameNumber)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
+
+    const router2 = createTestRouter('/challenges/grandmaster');
+    await router2.isReady();
+    const wrapper2 = mount(App, { global: { plugins: [router2] } });
+    await flushPromises();
+    expect(wrapper2.get('[data-game-history-count]').text()).toContain('10 / 10 saved');
+    expect(wrapper2.findAll('[data-game-history-item]')).toHaveLength(10);
+    wrapper2.unmount();
+  });
 });

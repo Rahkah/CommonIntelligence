@@ -1406,6 +1406,14 @@ it('supports 1-step agent quickstart, 1,000-AI shared canvas painting, collectiv
   expect(resolved.match.roundNumber).toBe(2);
   expect(resolved.match.moveHistory).toHaveLength(2);
   expect(resolved.match.specialActions?.some((m) => m.uci === 'resign')).toBe(true);
+  expect(resolved.match.voteHistory).toHaveLength(1);
+  expect(resolved.match.voteHistory[0]).toMatchObject({
+    roundNumber: 1,
+    winningMoveUci: 'e2e4',
+    winningMoveSan: 'e4',
+    stockfishReplyUci: resolved.stockfishReply.uci,
+    totalVotes: 3,
+  });
 
   // Round 2: AI Swarm votes to resign ("resign" / "投降") -> resolving ends game cleanly as 0-1 without Stockfish reply
   await ok(
@@ -1433,6 +1441,57 @@ it('supports 1-step agent quickstart, 1,000-AI shared canvas painting, collectiv
   expect(resigned.stockfishReply).toBeNull();
   expect(resigned.match.status).toBe('finished');
   expect(resigned.match.result).toBe('0-1');
+  expect(resigned.match.voteHistory.map((r) => r.roundNumber)).toEqual([2, 1]);
+  expect(resigned.match.gameHistory).toHaveLength(1);
+  expect(resigned.match.gameHistory[0]).toMatchObject({
+    gameNumber: 1,
+    result: '0-1',
+    endReason: 'resign',
+    totalPlies: 3,
+    totalVotes: 5,
+  });
+  expect(resigned.match.gameHistory[0].voteHistory.map((r) => r.roundNumber)).toEqual([2, 1]);
+
+  // Finish 11 more games (Games #2..#12) to verify historical game storage is strictly capped at 10
+  let latestMatch = resigned.match;
+  for (let g = 2; g <= 12; g++) {
+    const started = await ok(
+      request('/api/chess/grandmaster/new-game', {
+        headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+        body: {},
+      }),
+      201
+    );
+    expect(started.gameNumber).toBe(g);
+    expect(started.status).toBe('playing');
+
+    await ok(
+      request('/api/chess/grandmaster/vote', {
+        headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+        body: { agentId: qsChess1.agentId, move: 'resign', reason: `Concede game #${g}` },
+      }),
+      201
+    );
+    const ended = await ok(
+      request('/api/chess/grandmaster/resolve', {
+        headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+        body: {},
+      })
+    );
+    latestMatch = ended.match;
+  }
+
+  expect(latestMatch.gameHistory).toHaveLength(10);
+  expect(latestMatch.gameHistory.map((g) => g.gameNumber)).toEqual([12, 11, 10, 9, 8, 7, 6, 5, 4, 3]);
+  expect(
+    await query('SELECT count(*) n FROM chess_game_history WHERE challenge_id=?', 'grandmaster').first('n')
+  ).toBe(10);
+  expect(
+    await query(
+      'SELECT count(*) n FROM chess_votes WHERE challenge_id=? AND game_number IN (1, 2)',
+      'grandmaster'
+    ).first('n')
+  ).toBe(0);
 
   // Start next game so subsequent tests see an active game cleanly
   const nextGame = await ok(
@@ -1442,8 +1501,9 @@ it('supports 1-step agent quickstart, 1,000-AI shared canvas painting, collectiv
     }),
     201
   );
-  expect(nextGame.gameNumber).toBe(2);
+  expect(nextGame.gameNumber).toBe(13);
   expect(nextGame.status).toBe('playing');
+  expect(nextGame.gameHistory).toHaveLength(10);
 
   // 4. Lightweight agent-only analysis note without needing a PR
   const note = await ok(
