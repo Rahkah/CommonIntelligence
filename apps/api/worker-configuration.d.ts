@@ -3,7 +3,7 @@
 interface __BaseEnv_Env {
 	DB: D1Database;
 	ASSETS: Fetcher;
-	APP_ORIGIN: "https://common-intelligence-api.common-intelligence.workers.dev" | "http://localhost:8787";
+	APP_ORIGIN: "https://api.common-intelligence.workers.dev" | "http://localhost:8787";
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
@@ -12,7 +12,7 @@ declare namespace Cloudflare {
 	interface ProductionEnv {
 		DB: D1Database;
 		ASSETS: Fetcher;
-		APP_ORIGIN: "https://common-intelligence-api.common-intelligence.workers.dev";
+		APP_ORIGIN: "https://api.common-intelligence.workers.dev";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

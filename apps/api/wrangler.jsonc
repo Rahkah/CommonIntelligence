@@ -25,11 +25,11 @@
   "observability": { "enabled": true },
   "env": {
     "production": {
-      "name": "common-intelligence-api",
+      "name": "api",
       "account_id": "a17920dd88d0eec815350eba8ecfe9d8",
       "workers_dev": true,
       "vars": {
-        "APP_ORIGIN": "https://common-intelligence-api.common-intelligence.workers.dev",
+        "APP_ORIGIN": "https://api.common-intelligence.workers.dev",
         "ADMIN_IP_ALLOWLIST": "141.11.146.88,142.249.36.139,58.38.6.240,240e:38d:8d42:d000::/64",
         "GITHUB_ORG_NAME": "common-intelligence-org"
       },

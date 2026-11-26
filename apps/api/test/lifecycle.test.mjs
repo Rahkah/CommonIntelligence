@@ -882,7 +882,7 @@ it('automates public GitHub repo creation, ownership notice, webhook setup, batc
   const prevAllowlist = env.ADMIN_IP_ALLOWLIST;
   env.GITHUB_ADMIN_TOKEN = 'ghp_test_automation_token';
   env.GITHUB_ORG_NAME = 'common-intelligence-org';
-  env.APP_ORIGIN = 'https://common-intelligence-api.common-intelligence.workers.dev';
+  env.APP_ORIGIN = 'https://api.common-intelligence.workers.dev';
   env.ADMIN_IP_ALLOWLIST = '141.11.146.88';
 
   setGitHubRepoFetch(async (url, init = {}) => {
