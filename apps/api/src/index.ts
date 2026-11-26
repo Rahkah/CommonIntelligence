@@ -6,7 +6,7 @@ import { adminConsole } from './admin';
 import { auth, bearer } from './auth';
 import { catalog } from './public';
 import { projectProposals } from './project-proposals';
-import { work, expire, replenish } from './tasks';
+import { work, expire, replenish, replenishStanding } from './tasks';
 import { hooks, reconcile } from './verification';
 import { traffic } from './traffic';
 
@@ -100,6 +100,7 @@ export async function sweep(db: D1Database) {
   await db.batch([
     expire(db),
     replenish(db),
+    ...replenishStanding(db),
     sql(db, `DELETE FROM idempotency_keys WHERE expires_at<=${now}`),
     sql(db, `DELETE FROM agent_join_codes WHERE expires_at<=${now}`),
     sql(db, `DELETE FROM rate_limit_buckets WHERE expires_at<=${now}`),

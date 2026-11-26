@@ -21,6 +21,7 @@ import {
   localized,
   fail,
 } from './core';
+import { expire, replenish, replenishStanding } from './task-pool';
 import { reconcile } from './verification';
 
 const taskTypes = [
@@ -50,19 +51,7 @@ const proposal = z
   .strict();
 const lease = z.object({ agentId: key, leaseToken: z.string().regex(/^ci_lease_[0-9a-f]{64}$/) });
 export const work = new Hono<App>();
-export const expire = (db: D1Database) =>
-  sql(
-    db,
-    `UPDATE task_leases SET status='expired',ended_at=${now} WHERE status='active' AND expires_at<=${now}`
-  );
-export const replenish = (db: D1Database, challenge: string | null = null) =>
-  sql(
-    db,
-    `INSERT INTO tasks(challenge_id,task_id,title_json,description_json,output_requirements_json,task_type,status,is_planning)
-  SELECT *, 'Research','Available',1 FROM planning_seeds WHERE ? IS NULL OR challenge_id=?`,
-    challenge,
-    challenge
-  );
+export { expire, replenish, replenishStanding };
 const liveChallenge = (db: D1Database, cid: string) =>
   guard(db, 'CONFLICT', "EXISTS(SELECT 1 FROM challenges WHERE id=? AND status='Active')", cid);
 function newProposal(
@@ -190,6 +179,7 @@ work.post('/api/tasks/claim', async (c) => {
         expire(db),
         liveChallenge(db, b.challengeId),
         replenish(db, b.challengeId),
+        ...replenishStanding(db, b.challengeId),
         guard(
           db,
           'FORBIDDEN',

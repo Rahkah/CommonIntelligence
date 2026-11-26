@@ -1118,3 +1118,80 @@ it('hides agent machine labels from public tasks, activity, and agent lookup end
   expect(regEvent.summary.en).toContain('AWS Quick (Smart mode)');
   expect(JSON.stringify(activityList.items)).not.toContain('Bleap-Pro');
 });
+
+it('auto-schedules bounded routine review and knowledge tasks when no primary tasks are available', async () => {
+  const cid = await challenge();
+  const a1 = await agent(await login());
+  const a2 = await agent(await login());
+  const a3 = await agent(await login());
+
+  // Claim the planning task and submit two proposals: approve one into Verifying, leave one Proposed
+  // so needed_plans cannot create another planning seed and primary Available count drops to 0.
+  const planLease = await ok(claim(a1, cid));
+  const planned = await ok(
+    request('/api/tasks/' + planLease.taskId + '/plan', {
+      headers: a1.headers,
+      body: {
+        agentId: a1.id,
+        leaseToken: planLease.leaseToken,
+        tasks: [proposal('Primary implementation'), proposal('Pending review idea')],
+      },
+    })
+  );
+  const [primaryTid] = planned.taskIds;
+  await ok(approve(primaryTid));
+  const primaryLease = await ok(claim(a1, cid, primaryTid));
+  await ok(
+    request('/api/tasks/' + primaryTid + '/submit', {
+      headers: a1.headers,
+      body: {
+        agentId: a1.id,
+        leaseToken: primaryLease.leaseToken,
+        headSha: sha,
+        prUrl: 'https://github.com/example/' + cid + '/pull/11',
+        summary: 'Awaiting maintainer review',
+      },
+    })
+  );
+
+  // 1. With 0 Available primary tasks and a Submitted PR, GET /api/tasks schedules MAINT-REVIEW-*
+  const firstPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
+  expect(firstPool.items).toHaveLength(1);
+  expect(firstPool.items[0].taskId).toMatch(/^MAINT-REVIEW-/);
+  expect(firstPool.items[0].taskType).toBe('Verification');
+  expect(firstPool.items[0].priority).toBe('Low');
+
+  // Repeated GET does not duplicate standing tasks while one is already Available
+  const repeatedPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
+  expect(repeatedPool.items).toHaveLength(1);
+  expect(repeatedPool.items[0].taskId).toBe(firstPool.items[0].taskId);
+
+  // 2. After Agent 1 claims MAINT-REVIEW-*, Agent 2 receives rotated MAINT-KNOWLEDGE-*
+  const reviewLease = await ok(claim(a1, cid));
+  expect(reviewLease.taskId).toBe(firstPool.items[0].taskId);
+
+  const secondPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
+  expect(secondPool.items).toHaveLength(1);
+  expect(secondPool.items[0].taskId).toMatch(/^MAINT-KNOWLEDGE-/);
+  expect(secondPool.items[0].taskType).toBe('Documentation');
+
+  // 3. After Agent 2 claims MAINT-KNOWLEDGE-*, concurrent standing task cap (2) prevents flooding
+  const knowledgeLease = await ok(claim(a2, cid));
+  expect(knowledgeLease.taskId).toBe(secondPool.items[0].taskId);
+
+  const cappedPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
+  expect(cappedPool.items).toHaveLength(0);
+  expect((await claim(a3, cid)).status).toBe(409);
+
+  // 4. Releasing a standing task frees a slot; approving the Proposed primary task still takes priority
+  await ok(
+    request('/api/tasks/' + knowledgeLease.taskId + '/release', {
+      headers: a2.headers,
+      body: { agentId: a2.id, leaseToken: knowledgeLease.leaseToken, reason: 'handing off' },
+    })
+  );
+  const [, secondProposalTid] = planned.taskIds;
+  await ok(approve(secondProposalTid));
+  const nextClaim = await ok(claim(a3, cid));
+  expect(nextClaim.taskId).toBe(secondProposalTid);
+}, 20000);

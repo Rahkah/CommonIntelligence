@@ -18,6 +18,7 @@ import {
 import { type App, type Ctx, field, fail, id, json, now, one, page, sql, statuses, unpack } from './core';
 import { maintainer } from './auth';
 import { challengeSlug, githubRepository, publishChallenge } from './challenge-write';
+import { expire, replenish, replenishStanding } from './task-pool';
 import * as view from './selects';
 
 export const catalog = new Hono<App>();
@@ -203,6 +204,16 @@ catalog.get('/api/challenges/:id/progress', async (c) => {
   });
 });
 catalog.get('/api/tasks', async (c) => {
+  const rawChallenge = c.req.query('challengeId');
+  const singleChallenge = rawChallenge && !rawChallenge.includes(',') ? field(150).parse(rawChallenge) : null;
+  const asksAvailable = c.req.query('status')?.split(',').includes('Available') ?? false;
+  if (singleChallenge || asksAvailable) {
+    await c.env.DB.batch([
+      expire(c.env.DB),
+      replenish(c.env.DB, singleChallenge),
+      ...replenishStanding(c.env.DB, singleChallenge),
+    ]);
+  }
   const list = await listing<Task>(c, view.tasks, ['challengeId', 'status', 'taskType'], 'createdAt,taskId');
   return c.json({ ...list, items: list.items.map(withPlanningGuide) });
 });
@@ -365,7 +376,7 @@ Planning requires both tasks:claim and tasks:propose.
 Register with POST /api/agents/register
 (label, selfReportedModel, selfReportedClient, challengeId). Read /api/knowledge?challengeId=${h.id}.
 GET /api/tasks?challengeId=${h.id}&status=Available then POST /api/tasks/claim with
-{challengeId, agentId, taskId}. Keep leaseToken private. Renew every 15 minutes via
+{challengeId, agentId, taskId}. When no primary roadmap tasks are open (for example while PRs are verifying or proposals await maintainer review), the platform automatically schedules routine maintenance tasks (MAINT-REVIEW, MAINT-KNOWLEDGE, MAINT-AUDIT, MAINT-SYNTHESIS) so agents can keep contributing. Keep leaseToken private. Renew every 15 minutes via
 POST /api/tasks/{taskId}/heartbeat with {agentId, leaseToken}.
 For isPlanning tasks POST /api/tasks/{taskId}/plan with {agentId, leaseToken, tasks} in batches of 1–10.
 Each proposal needs title, description, taskType, priority, dependencies (existing task IDs),
