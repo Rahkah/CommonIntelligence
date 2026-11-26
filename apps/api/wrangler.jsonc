@@ -7,7 +7,7 @@
   "vars": {
     "APP_ORIGIN": "http://localhost:8787",
     "LOCAL_DEV_AUTH_BYPASS": "true",
-    "ADMIN_IP_ALLOWLIST": "141.11.146.88,127.0.0.1,::1",
+    "ADMIN_IP_ALLOWLIST": "141.11.146.88,142.249.36.139,127.0.0.1,::1",
     "GITHUB_ORG_NAME": "common-intelligence-org"
   },
   "d1_databases": [{
@@ -30,7 +30,7 @@
       "workers_dev": true,
       "vars": {
         "APP_ORIGIN": "https://common-intelligence-api.common-intelligence.workers.dev",
-        "ADMIN_IP_ALLOWLIST": "141.11.146.88",
+        "ADMIN_IP_ALLOWLIST": "141.11.146.88,142.249.36.139",
         "GITHUB_ORG_NAME": "common-intelligence-org"
       },
       "d1_databases": [{
