@@ -1,27 +1,46 @@
 import type {
   ActivityEvent,
+  AgentCadenceMode,
   ApproveProjectProposalRequest,
   AgentToken,
   ApiErrorBody,
   AuthSessionResponse,
+  CanvasStateResponse,
   Challenge,
   ChallengeProgress,
+  ChatContextPack,
+  ChatOutputSchemaKind,
+  ChessMatchState,
   Contribution,
   ContributorFullProfile,
   CreateAgentTokenRequest,
   CreateAgentTokenResponse,
+  CreateChallengeNoteRequest,
   CreateProjectProposalRequest,
   Credential,
+  EffortTier,
+  JoinClassSelection,
   PaginatedResponse,
+  PaintCanvasRequest,
+  PaintCanvasResponse,
+  ProjectCategory,
   ProposeTaskRequest,
   ProjectProposal,
   ProjectProposalStatus,
   ProjectShowcase,
+  RaidClassId,
   ResearchArtifact,
+  ResolveChessRoundResponse,
   ShowcaseRelease,
   SiteTrafficOverview,
+  SubmitChatRelayRequest,
+  SubmitChatRelayResponse,
   Task,
   UserProfileSummary,
+  VerifyArtifactRequest,
+  VerifyArtifactResponse,
+  VoteChessMoveRequest,
+  VoteChessMoveResponse,
 } from '@common-intelligence/shared';
 import { demoAdapter } from './demoAdapter';
 
@@ -122,6 +141,12 @@ export const apiClient = {
     currentCsrfToken = undefined;
   },
 
+  async listCategories(): Promise<ProjectCategory[]> {
+    if (DATA_MODE === 'demo') return demoAdapter.listCategories();
+    const res = await apiFetch<{ items: ProjectCategory[]; total: number }>('/api/categories');
+    return res.items;
+  },
+
   async listChallenges(offset = 0, limit = 50): Promise<PaginatedResponse<Challenge>> {
     if (DATA_MODE === 'demo') {
       const all = await demoAdapter.listChallenges();
@@ -138,11 +163,63 @@ export const apiClient = {
     });
   },
 
-  createAgentJoinCode(challengeId: string): Promise<{ code: string; expiresAt: string }> {
+  createAgentJoinCode(
+    challengeId: string,
+    options?: { classId?: JoinClassSelection; budgetTier?: EffortTier; cadenceMode?: AgentCadenceMode }
+  ): Promise<{ code: string; expiresAt: string; sessionConfig?: Record<string, string> }> {
     return apiFetch('/api/agent-join', {
       method: 'POST',
-      body: JSON.stringify({ challengeId }),
+      body: JSON.stringify(options ? { challengeId, ...options } : { challengeId }),
     });
+  },
+
+  async getChatContextPack(
+    slugOrId: string,
+    params?: {
+      taskId?: string | null;
+      classId?: RaidClassId;
+      budgetTier?: EffortTier;
+      schemaKind?: ChatOutputSchemaKind;
+    }
+  ): Promise<ChatContextPack> {
+    if (DATA_MODE === 'demo') return demoAdapter.getChatContextPack(slugOrId, params);
+    const qs = new URLSearchParams();
+    if (params?.taskId) qs.set('taskId', params.taskId);
+    if (params?.classId) qs.set('classId', params.classId);
+    if (params?.budgetTier) qs.set('budgetTier', params.budgetTier);
+    if (params?.schemaKind) qs.set('schemaKind', params.schemaKind);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return apiFetch<ChatContextPack>(
+      `/api/challenges/${encodeURIComponent(slugOrId)}/context-pack${suffix}`
+    );
+  },
+
+  async submitChatRelay(
+    slugOrId: string,
+    payload: SubmitChatRelayRequest
+  ): Promise<SubmitChatRelayResponse> {
+    if (DATA_MODE === 'demo') return demoAdapter.submitChatRelay(slugOrId, payload);
+    return apiFetch<SubmitChatRelayResponse>(
+      `/api/challenges/${encodeURIComponent(slugOrId)}/chat-submit`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
+  async verifyArtifact(
+    artifactId: string,
+    payload: VerifyArtifactRequest
+  ): Promise<VerifyArtifactResponse> {
+    if (DATA_MODE === 'demo') return demoAdapter.verifyArtifact(artifactId, payload);
+    return apiFetch<VerifyArtifactResponse>(
+      `/api/artifacts/${encodeURIComponent(artifactId)}/verify`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
   },
 
   listProjectProposals(offset: number, reviewStatus?: ProjectProposalStatus): Promise<PaginatedResponse<ProjectProposal>> {
@@ -229,6 +306,77 @@ export const apiClient = {
     const qs = challengeId ? `?challengeId=${encodeURIComponent(challengeId)}` : '';
     const data = await apiFetch<PaginatedResponse<ResearchArtifact>>(`/api/knowledge${qs}`);
     return data.items;
+  },
+
+  async createChallengeNote(
+    slugOrId: string,
+    payload: CreateChallengeNoteRequest
+  ): Promise<ResearchArtifact> {
+    if (DATA_MODE === 'demo') return demoAdapter.createChallengeNote(slugOrId, payload);
+    return apiFetch<ResearchArtifact>(
+      `/api/challenges/${encodeURIComponent(slugOrId)}/notes`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
+  async getCanvasState(slugOrId: string): Promise<CanvasStateResponse> {
+    if (DATA_MODE === 'demo') return demoAdapter.getCanvasState(slugOrId);
+    return apiFetch<CanvasStateResponse>(`/api/canvas/${encodeURIComponent(slugOrId)}`);
+  },
+
+  async paintCanvas(slugOrId: string, payload: PaintCanvasRequest): Promise<PaintCanvasResponse> {
+    if (DATA_MODE === 'demo') return demoAdapter.paintCanvas(slugOrId, payload);
+    return apiFetch<PaintCanvasResponse>(
+      `/api/canvas/${encodeURIComponent(slugOrId)}/paint`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
+  async getChessMatch(slugOrId = 'grandmaster'): Promise<ChessMatchState> {
+    if (DATA_MODE === 'demo') return demoAdapter.getChessMatch(slugOrId);
+    return apiFetch<ChessMatchState>(`/api/chess/${encodeURIComponent(slugOrId)}`);
+  },
+
+  async voteChessMove(
+    slugOrId: string,
+    payload: VoteChessMoveRequest
+  ): Promise<VoteChessMoveResponse> {
+    if (DATA_MODE === 'demo') return demoAdapter.voteChessMove(slugOrId, payload);
+    return apiFetch<VoteChessMoveResponse>(
+      `/api/chess/${encodeURIComponent(slugOrId)}/vote`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  },
+
+  async resolveChessRound(slugOrId: string): Promise<ResolveChessRoundResponse> {
+    if (DATA_MODE === 'demo') return demoAdapter.resolveChessRound(slugOrId);
+    return apiFetch<ResolveChessRoundResponse>(
+      `/api/chess/${encodeURIComponent(slugOrId)}/resolve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }
+    );
+  },
+
+  async startNewChessGame(slugOrId: string): Promise<ChessMatchState> {
+    if (DATA_MODE === 'demo') return demoAdapter.startNewChessGame(slugOrId);
+    return apiFetch<ChessMatchState>(
+      `/api/chess/${encodeURIComponent(slugOrId)}/new-game`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }
+    );
   },
 
   async listContributions(challengeId?: string): Promise<Contribution[]> {

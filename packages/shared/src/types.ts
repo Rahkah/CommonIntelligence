@@ -4,6 +4,15 @@
 // for the Cloudflare Workers + Hono + D1 backend (see API.md).
 // ============================================================================
 
+import type {
+  ChatOutputSchemaKind,
+  EffortTier,
+  ParticipationMode,
+  RaidClassId,
+  TaskDeliveryMode,
+  TaskVerificationMode,
+} from './participation';
+
 export type Locale = 'en' | 'zh';
 
 export interface LocalizedText {
@@ -53,6 +62,7 @@ export interface ChallengeRecordInfo {
 
 export type ShowcaseKind =
   | 'chess-trainer'
+  | 'shared-canvas'
   | 'interactive-app'
   | 'visualization'
   | 'game'
@@ -61,6 +71,41 @@ export type ShowcaseKind =
   | 'replay'
   | 'metrics'
   | 'pending';
+
+export type ChallengeCategory = string;
+
+export const CHALLENGE_CATEGORY_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+export interface ProjectCategory {
+  id: string;
+  name: LocalizedText;
+  description: LocalizedText;
+  sortOrder: number;
+  challengesCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_PROJECT_CATEGORIES: ProjectCategory[] = [
+  {
+    id: 'challenge',
+    name: { en: 'Crowd-Agent Challenge', zh: '众筹 Agent 挑战' },
+    description: {
+      en: 'Collective multi-agent challenges where AIs team up against tough opponents or shared targets.',
+      zh: '汇聚全球 AI Agent 联手攻关或硬刚强敌的众筹挑战类项目。',
+    },
+    sortOrder: 1,
+  },
+  {
+    id: 'playground',
+    name: { en: 'Playground', zh: '游乐场' },
+    description: {
+      en: 'Open-ended creative sandboxes where independent agents explore, build, and improvise together.',
+      zh: '开放式多 Agent 互动游乐场，让 AI 自由发挥创意与协作。',
+    },
+    sortOrder: 2,
+  },
+];
 
 export interface ShowcaseMetric {
   label: LocalizedText;
@@ -129,6 +174,7 @@ export interface Challenge {
   id: string;
   slug: string;
   name: string;
+  category?: ChallengeCategory;
   tagline: LocalizedText;
   domain: LocalizedText;
   status: ChallengeStatus;
@@ -164,8 +210,9 @@ export interface ProjectBriefContent {
   domain: string;
   summary: string;
   goal: string;
-  scoringMetric: string;
-  acceptanceCriteria: string;
+  category?: ChallengeCategory;
+  scoringMetric?: string;
+  acceptanceCriteria?: string;
   visualizationGoal?: string;
   githubRepo?: string;
 }
@@ -191,6 +238,7 @@ export interface ProjectProposal extends ProjectBriefContent {
 
 export interface ApproveProjectProposalRequest {
   slug: string;
+  category?: ChallengeCategory;
   githubRepo?: string;
   autoCreateRepo?: boolean;
   trustedCheckName?: string;
@@ -333,6 +381,14 @@ export interface Task {
   status: TaskStatus;
   dependencies: string[];
   requiredCapabilities: string[];
+  recommendedClass?: RaidClassId | null;
+  effortTier?: EffortTier;
+  supportedModes?: ParticipationMode[];
+  deliveryMode?: TaskDeliveryMode;
+  outputSchemaKind?: ChatOutputSchemaKind | null;
+  verificationMode?: TaskVerificationMode;
+  triggerSource?: string | null;
+  triggerRefId?: string | null;
   acceptanceCriteria: LocalizedText[];
   inputArtifacts: string[];
   outputRequirements: LocalizedText;
@@ -366,12 +422,12 @@ export interface ProposeTaskRequest {
   challengeId: string;
   title: string;
   description: string;
-  taskType: TaskType;
-  priority: TaskPriority;
-  dependencies: string[];
-  requiredCapabilities: string[];
-  acceptanceCriteria: string[];
-  outputRequirements: string;
+  taskType?: TaskType | 'Feature' | 'Experiment' | 'Creative' | 'Playtest' | 'Bugfix';
+  priority?: TaskPriority;
+  dependencies?: string[];
+  requiredCapabilities?: string[];
+  acceptanceCriteria?: string[];
+  outputRequirements?: string;
 }
 
 // --- Knowledge, Research Findings & Contributions ---
@@ -389,8 +445,187 @@ export const CONTRIBUTION_TYPES = [
   'IndependentVerification',
   'CandidateStructure',
   'FailedApproach',
+  'Feature',
+  'Experiment',
+  'Showcase',
+  'Bugfix',
+  'Creative',
+  'Playtest',
 ] as const;
 export type ContributionType = (typeof CONTRIBUTION_TYPES)[number];
+
+// --- Shared Multi-Agent Canvas Playground ---
+
+export interface CanvasPixel {
+  x: number;
+  y: number;
+  color: string;
+  authorGithubId: string;
+  authorUsername: string;
+  agentId?: string | null;
+  agentModel?: string | null;
+  note?: string | null;
+  updatedAt: string;
+}
+
+export interface CanvasStroke {
+  id: string;
+  challengeId: string;
+  authorGithubId: string;
+  authorUsername: string;
+  agentId?: string | null;
+  agentModel?: string | null;
+  pixels: Array<{ x: number; y: number; color: string }>;
+  note?: string | null;
+  createdAt: string;
+}
+
+export interface CanvasStateResponse {
+  challengeId: string;
+  width: number;
+  height: number;
+  palette: string[];
+  pixels: CanvasPixel[];
+  recentStrokes: CanvasStroke[];
+  stats: {
+    paintedPixels: number;
+    totalStrokes: number;
+    uniqueAgents: number;
+    uniqueBuilders: number;
+    targetAgents: number;
+  };
+  updatedAt: string;
+  isDemo?: boolean;
+}
+
+export interface PaintCanvasRequest {
+  pixels: Array<{ x: number; y: number; color: string }>;
+  agentId?: string;
+  agentModel?: string;
+  note?: string;
+}
+
+export interface PaintCanvasResponse {
+  stroke: CanvasStroke;
+  paintedCount: number;
+}
+
+export interface CreateChallengeNoteRequest {
+  title: string;
+  summary: string;
+  methodNotes?: string;
+  kind?: 'Experiment' | 'ResearchNote' | 'FailedApproach';
+  agentId?: string;
+}
+
+export interface QuickstartAgentResponse {
+  plaintextToken: string;
+  agentId: string;
+  challengeId: string;
+  challengeSlug: string;
+  expiresAt: string;
+  maxConcurrentTasks: number;
+  maxTotalTasks: number;
+  nextSteps: {
+    canvasEndpoint?: string;
+    chessEndpoint?: string;
+    tasksEndpoint: string;
+    notesEndpoint: string;
+  };
+}
+
+// --- Collective Vote Chess vs Stockfish 19 ---
+
+export const CHESS_RESIGN_UCI = 'resign' as const;
+export const CHESS_RESIGN_SAN = 'Resign' as const;
+
+export function isChessResignInput(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  return (
+    normalized === 'resign' ||
+    normalized === 'surrender' ||
+    normalized === 'concede' ||
+    normalized === '0-1' ||
+    normalized === '投降' ||
+    normalized === '认输'
+  );
+}
+
+export interface ChessMoveOption {
+  uci: string;
+  san: string;
+}
+
+export interface ChessMoveVote {
+  voterKey: string;
+  authorGithubId: string;
+  authorUsername: string;
+  agentId?: string | null;
+  agentModel?: string | null;
+  moveUci: string;
+  moveSan: string;
+  reason?: string | null;
+  createdAt: string;
+}
+
+export interface ChessMoveTally {
+  moveUci: string;
+  moveSan: string;
+  votes: number;
+  percentage: number;
+  voters: Array<{ username: string; agentModel?: string | null }>;
+}
+
+export interface ChessGameMove {
+  ply: number;
+  side: 'white' | 'black';
+  uci: string;
+  san: string;
+  actor: string;
+  votes?: number;
+  evalWhiteCp?: number;
+  playedAt: string;
+}
+
+export interface ChessMatchState {
+  challengeId: string;
+  gameNumber: number;
+  roundNumber: number;
+  fen: string;
+  sideToMove: 'white' | 'black';
+  status: 'playing' | 'finished';
+  result: string;
+  opponentName: string;
+  opponentElo: number;
+  roundDeadlineAt: string;
+  legalMoves: ChessMoveOption[];
+  specialActions?: ChessMoveOption[];
+  moveHistory: ChessGameMove[];
+  tallies: ChessMoveTally[];
+  recentVotes: ChessMoveVote[];
+  totalVotesThisRound: number;
+  uniqueVotersTotal: number;
+  updatedAt: string;
+  isDemo?: boolean;
+}
+
+export interface VoteChessMoveRequest {
+  move: string; // UCI (e.g. "e2e4") or SAN (e.g. "Nf3")
+  agentId?: string;
+  agentModel?: string;
+  reason?: string;
+}
+
+export interface VoteChessMoveResponse {
+  vote: ChessMoveVote;
+  match: ChessMatchState;
+}
+
+export interface ResolveChessRoundResponse {
+  collectiveMove: ChessGameMove;
+  stockfishReply: ChessGameMove | null;
+  match: ChessMatchState;
+}
 
 export interface ResearchArtifact {
   id: string;
@@ -417,6 +652,10 @@ export interface ResearchArtifact {
   verifierVersion: string | null;
   parentArtifactIds: string[];
   taskId: string | null;
+  submissionChannel?: ParticipationMode;
+  roleClass?: RaidClassId | null;
+  verifiedCount?: number;
+  refutedByArtifactId?: string | null;
   createdAt: string;
   isDemo?: boolean;
 }

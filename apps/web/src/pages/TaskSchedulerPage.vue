@@ -29,7 +29,7 @@ const initialView = computed<SchedulerViewMode>(() => {
   if (q === 'graph' || q === 'decomposition' || q === 'contributors' || q === 'board') {
     return q;
   }
-  return 'graph';
+  return 'board';
 });
 
 const initialContributor = computed<string | null>(() =>

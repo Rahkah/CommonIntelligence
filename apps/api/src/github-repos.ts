@@ -213,26 +213,17 @@ Licensed under the [MIT License](./LICENSE) — \`Copyright (c) 2026 Common Inte
 
 export function buildPullRequestTemplate(slug: string): string {
   return `- Challenge ID: ${slug}
-- Task ID: TASK-XXX
-- Agent ID: agt_...
-- Agent Model (self-reported): <model-name or human>
-- Contribution Type: <RecordImprovement|SearchAlgorithm|PruningStrategy|Optimization|MathematicalLemma|VerifiedSearchRegion|Counterexample|IndependentVerification|CandidateStructure|FailedApproach>
-- Parent Contributions: <comma-separated contribution IDs, or None>
+- Task ID: <optional, e.g. TASK-GM-01 or task_...>
+- Agent ID: <optional, agt_...>
+- Agent Model (self-reported): <optional, e.g. claude-sonnet-4.5 or human>
+- Contribution Type: <Experiment|Feature|Optimization|Showcase|Bugfix|Creative|Playtest|RecordImprovement>
+- Parent Contributions: None
 
 ## Summary
-<!-- Concise statement of what was achieved or refuted -->
+<!-- What did you build, improve, or test? -->
 
-## Method
-<!-- Algorithm, implementation, specification, or experimental setup -->
-
-## Results
-<!-- Exact measured outputs, metrics, digests, or verification evidence -->
-
-## Reproduction Steps
-<!-- Exact deterministic commands to reproduce locally -->
-
-## Limitations
-<!-- Known bounds, edge cases, or assumptions -->
+## How to Try It (Optional)
+<!-- Commands or notes if others want to run it -->
 `;
 }
 
@@ -327,8 +318,9 @@ const CHECK_NAME = ${JSON.stringify(spec.trustedCheckName)};
 const CONTRIBUTION_TYPES = [
   'RecordImprovement', 'SearchAlgorithm', 'PruningStrategy', 'Optimization', 'MathematicalLemma',
   'VerifiedSearchRegion', 'Counterexample', 'IndependentVerification', 'CandidateStructure', 'FailedApproach',
+  'Feature', 'Experiment', 'Showcase', 'Bugfix', 'Creative', 'Playtest',
 ];
-const REQUIRED_SECTIONS = ['Summary', 'Method', 'Results', 'Reproduction Steps', '(?:Clean-Room & )?Limitations'];
+const REQUIRED_SECTIONS = ['Summary'];
 const MAX_FILES = 200;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const PROTECTED_PATHS = [/^\\.github\\//, /^verifiers\\//, /^LICENSE$/, /^NOTICE$/];${extraChecks}
@@ -345,15 +337,22 @@ export function section(body, name) {
 export function checkBody(body) {
   const errors = [];
   if (metadata(body, 'Challenge ID') !== CHALLENGE_ID) errors.push(\`Challenge ID must be "\${CHALLENGE_ID}".\`);
-  if (!/^TASK-[A-Z0-9-]+$/.test(metadata(body, 'Task ID'))) errors.push('Task ID must look like TASK-...');
-  if (!/^agt_[A-Za-z0-9_-]+$/.test(metadata(body, 'Agent ID'))) errors.push('Agent ID must be a platform agent ID (agt_...).');
-  if (!metadata(body, 'Agent Model \\\\(self-reported\\\\)')) errors.push('Agent Model (self-reported) is required.');
-  if (!CONTRIBUTION_TYPES.includes(metadata(body, 'Contribution Type'))) errors.push('Contribution Type is not a known type.');
+  const taskId = metadata(body, 'Task ID');
+  if (taskId && !/^(TASK-|QUEST-|PLAN-|task_)[A-Za-z0-9_-]+$/.test(taskId)) {
+    errors.push('Task ID format looks invalid (use TASK-..., QUEST-..., or task_...).');
+  }
+  const agentId = metadata(body, 'Agent ID');
+  if (agentId && !/^agt_[A-Za-z0-9_-]+$/.test(agentId)) {
+    errors.push('Agent ID must start with agt_ when provided.');
+  }
+  const kind = metadata(body, 'Contribution Type');
+  if (kind && !CONTRIBUTION_TYPES.includes(kind)) errors.push('Contribution Type is not a known type.');
   const parents = metadata(body, 'Parent Contributions');
-  if (!parents) errors.push('Parent Contributions is required (use None if there are none).');
-  else if (!/^none$/i.test(parents) && parents.split(',').length > 32) errors.push('At most 32 parent contributions.');
+  if (parents && !/^none$/i.test(parents) && parents.split(',').length > 32) {
+    errors.push('At most 32 parent contributions.');
+  }
   for (const name of REQUIRED_SECTIONS) {
-    if (!section(body, name)) errors.push(\`Section "## \${name.replace(/\\(\\?:|\\)\\?/g, '')}" must not be empty.\`);
+    if (!section(body, name)) errors.push(\`Section "## \${name}" must not be empty.\`);
   }
   return errors;
 }

@@ -77,11 +77,25 @@ describe('Project showcase manifest validation', () => {
     }
   });
 
-  it('creates a clean default pending showcase waiting for first contributor', () => {
-    const pending = createDefaultPendingShowcase('Open Game');
+  it('accepts a valid shared-canvas playground manifest', () => {
+    const res = validateShowcaseManifest({
+      schemaVersion: 1,
+      kind: 'shared-canvas',
+      status: 'live',
+      version: '0.1.0',
+      title: { en: '1,000-AI Shared Canvas', zh: '众 Agent 共享画布' },
+      visualizationGoal: { en: 'Paint pixels live.', zh: '实时像素涂鸦。' },
+      dataEndpoint: '/api/canvas/shared-canvas',
+      refreshMode: 'poll',
+    });
+    expect('data' in res).toBe(true);
+  });
+
+  it('creates a clean default pending showcase waiting for first builder', () => {
+    const pending = createDefaultPendingShowcase('New Playground');
     expect(pending.kind).toBe('pending');
     expect(pending.status).toBe('pending');
-    expect(pending.visualizationGoal.en).toContain('This project is waiting for its first contributor.');
+    expect(pending.visualizationGoal.en).toContain('Waiting for the first builder');
     expect(pending.repoManifestPath).toBe(SHOWCASE_MANIFEST_PATH);
   });
 });

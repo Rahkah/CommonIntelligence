@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import {
   CONTRIBUTION_TYPES,
+  DEFAULT_PROJECT_CATEGORIES,
   type ApproveProjectProposalRequest,
   type ContributionType,
+  type ProjectCategory,
   type ProjectProposal,
 } from '@common-intelligence/shared';
 import { apiClient, ApiRequestError } from '@/api/client';
@@ -12,13 +14,20 @@ import { useAppState } from '@/stores/appState';
 
 const props = defineProps<{ proposal: ProjectProposal }>();
 const emit = defineEmits<{ reviewed: [ProjectProposal]; refresh: [] }>();
-const { t } = useAppState();
+const { t, loc } = useAppState();
+const categories = ref<ProjectCategory[]>([...DEFAULT_PROJECT_CATEGORIES]);
+onMounted(() => {
+  apiClient.listCategories().then((list) => {
+    if (list.length > 0) categories.value = list;
+  }).catch(() => {});
+});
 const action = ref<'approve' | 'reject'>('approve');
 const saving = ref(false);
 const error = ref<ReturnType<typeof projectErrorKey>>();
 const reason = ref('');
 const form = reactive({
   slug: props.proposal.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80),
+  category: props.proposal.category ?? 'challenge',
   autoCreateRepo: !props.proposal.githubRepo,
   githubRepo: props.proposal.githubRepo ?? '',
   trustedCheckName: '',
@@ -93,6 +102,14 @@ async function review() {
           <label class="project-field">
             <span>{{ t.projects.slug }}</span>
             <input v-model.trim="form.slug" required maxlength="80" pattern="[a-z0-9][a-z0-9\-]{0,79}" placeholder="project-name" />
+          </label>
+          <label class="project-field">
+            <span>{{ t.projects.category }}</span>
+            <select v-model="form.category">
+              <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                {{ loc(cat.name) }}
+              </option>
+            </select>
           </label>
           <label class="project-field">
             <span>{{ t.projects.githubRepo }}</span>

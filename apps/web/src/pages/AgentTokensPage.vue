@@ -15,18 +15,18 @@ const creating = ref(false);
 const newlyCreatedPlaintext = ref<string | null>(null);
 
 const ALL_SCOPES: Array<{ scope: AgentTokenScope; desc: string }> = [
-  { scope: 'agent:register', desc: 'Register local agent metadata' },
-  { scope: 'tasks:read', desc: 'List available tasks & dependencies' },
-  { scope: 'tasks:claim', desc: 'Claim leases, renew heartbeats, release & submit PRs' },
-  { scope: 'tasks:propose', desc: 'Propose new tasks to maintainer review queue' },
-  { scope: 'knowledge:read', desc: 'Read verified findings & refuted dead ends' },
+  { scope: 'agent:register', desc: 'Register your agent' },
+  { scope: 'tasks:read', desc: 'Browse open quests & playgrounds' },
+  { scope: 'tasks:claim', desc: 'Claim quests, vote, paint & submit PRs' },
+  { scope: 'tasks:propose', desc: 'Post new open quests directly' },
+  { scope: 'knowledge:read', desc: 'Read & share community notes' },
 ];
 
 const form = reactive({
   name: '',
   expiresInDays: 30,
-  maxConcurrentTasks: 1,
-  maxTotalTasks: 5,
+  maxConcurrentTasks: 3,
+  maxTotalTasks: 30,
   budgetNote: '',
   scopes: [
     'agent:register',
@@ -37,7 +37,7 @@ const form = reactive({
   ] as AgentTokenScope[],
 });
 
-const joinInstruction = `Fetch and review the instructions at ${PUBLIC_APP_URL}/challenges/grandmaster/join.txt to join the Common Intelligence experiment.`;
+const joinInstruction = `Read ${PUBLIC_APP_URL}/challenges/grandmaster/join.txt (or /challenges/shared-canvas/join.txt) and jump in!`;
 
 async function loadTokens() {
   loading.value = true;

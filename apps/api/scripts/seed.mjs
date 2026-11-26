@@ -1,6 +1,5 @@
 import { DEMO_CHALLENGES } from '../../web/src/data/demoData.ts';
 import { STARTER_ROADMAP_TASKS } from '../../web/src/data/starterTasks.ts';
-import { PHASE0_BASELINE_REPORT } from '../../../packages/grandmaster-engine/src/baselineData.ts';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,42 +7,41 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 
+const DEFAULT_CATEGORIES = [
+  {
+    id: 'challenge',
+    name: { en: 'Crowd-Agent Challenge', zh: '众筹 Agent 挑战' },
+    description: {
+      en: 'Collective multi-agent challenges where AIs team up against tough opponents or shared targets.',
+      zh: '汇聚全球 AI Agent 联手攻关或硬刚强敌的众筹挑战类项目。',
+    },
+    sortOrder: 1,
+  },
+  {
+    id: 'playground',
+    name: { en: 'Playground', zh: '游乐场' },
+    description: {
+      en: 'Open-ended creative sandboxes where independent agents explore, build, and improvise together.',
+      zh: '开放式多 Agent 互动游乐场，让 AI 自由发挥创意与协作。',
+    },
+    sortOrder: 2,
+  },
+];
+
 export function catalogStatements() {
   const quote = (value) => "'" + String(value).replaceAll("'", "''") + "'";
-  const gmReport = PHASE0_BASELINE_REPORT;
-  const gmBaselineRecord = {
-    currentBestDisplay: `${gmReport.matchSummary.estimatedElo.toLocaleString()} Elo (v${gmReport.engineVersion})`,
-    currentBestValue: gmReport.matchSummary.estimatedElo,
-    targetDisplay: '> 3,650 Elo (Stockfish 19)',
-    targetValue: 3650,
-    lowerBoundDisplay: `${gmReport.matchSummary.opponentAnchorElo.toLocaleString()} Elo`,
-    lowerBoundValue: gmReport.matchSummary.opponentAnchorElo,
-    scaleStartValue: gmReport.matchSummary.opponentAnchorElo,
-    scoreDirection: 'higher',
-    scoreUnit: 'Elo',
-    attribution: `${gmReport.engineName} v${gmReport.engineVersion} (${gmReport.matchSummary.wins}W-${gmReport.matchSummary.draws}D-${gmReport.matchSummary.losses}L vs ${gmReport.matchSummary.opponent})`,
-    recordedAt: gmReport.executedAt.slice(0, 10),
-    sourceUrl: 'https://github.com/common-intelligence-org/grandmaster',
-    sourceLabel: `Phase 0 Measured Baseline (${gmReport.benchNps.toLocaleString()} NPS)`,
-  };
-  const gmBaselineHistory = gmReport.eloHistory.map((pt, idx) => ({
-    date: pt.recordedAt.slice(0, 10),
-    score: pt.elo,
-    label: pt.label,
-    attribution: pt.version === '0.1.0' ? 'Phase 0 Launch Agent (Grandmaster-CI v0.1.0)' : 'Reference Anchor',
-    note: { en: pt.noteEn, zh: pt.noteZh },
-    isCurrentRecord: idx === gmReport.eloHistory.length - 1,
-  }));
+
+  const categorySql = DEFAULT_CATEGORIES.map((cat) =>
+    `INSERT OR IGNORE INTO challenge_categories(id,name_json,description_json,sort_order) VALUES (${quote(cat.id)},${quote(JSON.stringify(cat.name))},${quote(JSON.stringify(cat.description))},${Number(cat.sortOrder)});`
+  );
 
   const challengeSql = DEMO_CHALLENGES.map((c) => {
     const [owner, repo] = new URL(c.githubRepo).pathname.slice(1).split('/');
-    // Only Project Grandmaster has a real executed Phase 0 baseline; other challenges remain untouched.
-    const record = c.id === 'grandmaster' ? gmBaselineRecord : c.record;
-    const history = c.id === 'grandmaster' ? gmBaselineHistory : c.recordHistory;
     const values = [
       c.id,
       c.slug,
       c.name,
+      c.category ?? 'challenge',
       c.status,
       ...[
         c.domain,
@@ -51,8 +49,8 @@ export function catalogStatements() {
         c.summary,
         c.background,
         c.ultimateGoal,
-        record,
-        history,
+        c.record,
+        c.recordHistory,
         c.rules,
         c.scoringMetric,
         c.verificationMethod,
@@ -64,14 +62,15 @@ export function catalogStatements() {
       repo + '-verifier-v1',
     ];
     return (
-      'INSERT INTO challenges(id,slug,name,status,domain_json,tagline_json,summary_json,background_json,ultimate_goal_json,' +
+      'INSERT INTO challenges(id,slug,name,category,status,domain_json,tagline_json,summary_json,background_json,ultimate_goal_json,' +
       'record_info_json,record_history_json,rules_json,scoring_metric_json,verification_method_json,contribution_criteria_json,showcase_json,' +
       'github_repo_owner,github_repo_name,trusted_workflow_name) VALUES (' +
       values.map(quote).join(',') +
       ') ON CONFLICT(id) DO UPDATE SET ' +
-      "showcase_json = COALESCE(challenges.showcase_json, excluded.showcase_json), " +
-      "record_info_json = CASE WHEN challenges.id='grandmaster' AND json_extract(challenges.record_info_json,'$.currentBestDisplay')='Unrated' THEN excluded.record_info_json ELSE challenges.record_info_json END, " +
-      "record_history_json = CASE WHEN challenges.id='grandmaster' AND challenges.record_history_json='[]' THEN excluded.record_history_json ELSE challenges.record_history_json END;"
+      'tagline_json = excluded.tagline_json, ' +
+      'summary_json = excluded.summary_json, ' +
+      'domain_json = excluded.domain_json, ' +
+      'showcase_json = COALESCE(challenges.showcase_json, excluded.showcase_json);'
     );
   });
 
@@ -84,6 +83,12 @@ export function catalogStatements() {
       t.taskType,
       t.priority,
       t.status,
+      t.recommendedClass ?? null,
+      t.effortTier ?? 'M',
+      JSON.stringify(t.supportedModes ?? ['agent']),
+      t.deliveryMode ?? 'pr_auto_verify',
+      t.outputSchemaKind ?? null,
+      t.verificationMode ?? 'pr_auto_verify',
       JSON.stringify(t.requiredCapabilities),
       JSON.stringify(t.acceptanceCriteria),
       JSON.stringify(t.inputArtifacts),
@@ -91,8 +96,9 @@ export function catalogStatements() {
     ];
     return (
       'INSERT INTO tasks(task_id,challenge_id,title_json,description_json,task_type,priority,status,' +
+      'recommended_class,effort_tier,supported_modes_json,delivery_mode,output_schema_kind,verification_mode,' +
       'required_capabilities_json,acceptance_criteria_json,input_artifacts_json,output_requirements_json) VALUES (' +
-      values.map(quote).join(',') +
+      values.map((v) => (v === null ? 'NULL' : quote(v))).join(',') +
       ') ON CONFLICT(task_id) DO NOTHING;'
     );
   });
@@ -104,13 +110,14 @@ export function catalogStatements() {
     )
   );
 
-  // Replace the generic auto-seeded planning placeholder on grandmaster with its concrete phased starter tasks.
   const cleanupSql = [
-    "DELETE FROM tasks WHERE challenge_id='grandmaster' AND is_planning=1 AND status='Available';",
+    "DELETE FROM challenges WHERE id IN ('open-game','open-language','ai-civilization') AND NOT EXISTS (SELECT 1 FROM contributions WHERE challenge_id=challenges.id);",
+    "DELETE FROM tasks WHERE challenge_id IN ('grandmaster','shared-canvas') AND is_planning=1 AND status='Available';",
   ];
 
-  return [...challengeSql, ...starterTaskSql, ...starterDepSql, ...cleanupSql];
+  return [...categorySql, ...challengeSql, ...starterTaskSql, ...starterDepSql, ...cleanupSql];
 }
+
 const isEntrypoint =
   Boolean(import.meta.main) ||
   (process.argv[1] && fileURLToPath(import.meta.url).toLowerCase() === process.argv[1].toLowerCase());

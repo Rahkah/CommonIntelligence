@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { type Ctx, digest, required, fail, hex, utf8, iso, now, sql } from './core';
-import type { Principal } from './auth';
+import { type Ctx, digest, fail, hex, utf8, iso, now, sql } from './core';
+import { tokenPepper, type Principal } from './auth';
 
 type Change = { writes: D1PreparedStatement[]; result: object; status?: 200 | 201 };
 type Cached = { request_hash: string; response_body: string; response_status: 200 | 201 };
@@ -12,7 +12,7 @@ function bytes(s: string) {
 async function cacheKey(c: Ctx) {
   return crypto.subtle.importKey(
     'raw',
-    await crypto.subtle.digest('SHA-256', utf8('response-cache:' + required(c.env.TOKEN_PEPPER))),
+    await crypto.subtle.digest('SHA-256', utf8('response-cache:' + tokenPepper(c))),
     'AES-GCM',
     false,
     ['encrypt', 'decrypt']

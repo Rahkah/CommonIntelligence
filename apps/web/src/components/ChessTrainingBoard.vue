@@ -1,391 +1,340 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { Contribution, ProjectShowcase } from '@common-intelligence/shared';
+import {
+  CHESS_RESIGN_UCI,
+  type ChessMatchState,
+  type Contribution,
+  type ProjectShowcase,
+} from '@common-intelligence/shared';
 import {
   ChessBoard,
-  ChessTrainingSession,
-  PHASE0_BASELINE_REPORT,
+  MATE_SCORE,
   WHITE,
-  moveToUci,
+  evaluateBoard,
   squareToAlgebraic,
-  type ChessMove,
-  type RecordedGame,
-  type TrainingSnapshot,
 } from '@common-intelligence/grandmaster-engine';
 import {
-  Activity,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Cpu,
-  ExternalLink,
-  FlaskConical,
-  Gamepad2,
-  GitCommit,
-  History,
-  Pause,
-  Play,
+  Check,
+  Clock,
+  Eye,
+  FastForward,
+  Flag,
+  RefreshCw,
   RotateCcw,
-  SkipBack,
-  SkipForward,
-  StepForward,
+  Sparkles,
+  Swords,
+  Trophy,
+  Users,
 } from 'lucide-vue-next';
-import StatusPill from '@/components/StatusPill.vue';
+import { apiClient } from '@/api/client';
+import ChessPieceIcon from '@/components/ChessPieceIcon.vue';
 import { useAppState } from '@/stores/appState';
 
-const props = defineProps<{
-  showcase: ProjectShowcase;
-  contributions: Contribution[];
-}>();
-
-const { state, loc } = useAppState();
-const L = (en: string, zh: string) => (state.locale === 'zh' ? zh : en);
-
-type ArenaMode = 'replay' | 'experiment' | 'play';
-const mode = ref<ArenaMode>('replay');
-
-// --- Real Phase 0 Baseline Report (100% real Node.js engine execution data) ---
-const report = PHASE0_BASELINE_REPORT;
-const selectedGameIndex = ref(0);
-const replayPly = ref(0);
-const replayPlaying = ref(false);
-let replayTimer: ReturnType<typeof setInterval> | null = null;
-
-const selectedGame = computed<RecordedGame>(
-  () => report.games[selectedGameIndex.value] ?? report.games[0]!
+const props = withDefaults(
+  defineProps<{
+    showcase?: ProjectShowcase;
+    contributions?: Contribution[];
+    slug?: string;
+    compact?: boolean;
+  }>(),
+  {
+    slug: 'grandmaster',
+    compact: false,
+  }
 );
 
-const replayBoardState = computed(() => {
-  const g = selectedGame.value;
-  const b = new ChessBoard(g.startFen);
-  const clampedPly = Math.min(replayPly.value, g.moves.length);
-  for (let i = 0; i < clampedPly; i++) {
-    const m = b.findMoveByUci(g.moves[i]!.uci);
-    if (m) b.makeMove(m, true);
+const emit = defineEmits<{
+  (e: 'join-agent'): void;
+}>();
+
+const { state, notify } = useAppState();
+const L = (en: string, zh: string) => (state.locale === 'zh' ? zh : en);
+
+const match = ref<ChessMatchState | null>(null);
+const loading = ref(true);
+const resolving = ref(false);
+const previewMoveUci = ref<string | null>(null);
+const countdownText = ref('08:00');
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+function updateCountdown() {
+  const deadline = match.value?.roundDeadlineAt;
+  if (!deadline) {
+    countdownText.value = '--:--';
+    return;
   }
-  const lastMove = clampedPly > 0 ? g.moves[clampedPly - 1]! : null;
+  const diffSec = Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000));
+  const m = Math.floor(diffSec / 60);
+  const s = diffSec % 60;
+  countdownText.value = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+async function loadMatch(silent = false) {
+  if (!silent) loading.value = true;
+  try {
+    match.value = await apiClient.getChessMatch(props.slug);
+    updateCountdown();
+  } finally {
+    loading.value = false;
+  }
+}
+
+const currentBoard = computed(() => new ChessBoard(match.value?.fen));
+
+const positionEval = computed(() => {
+  const m = match.value;
+  if (!m) {
+    return {
+      cp: 0,
+      whiteWinPct: 50,
+      blackWinPct: 50,
+      barWhitePct: 50,
+      shortScore: '0.0',
+      signedScore: '0.0',
+      favoredSide: 'even' as 'white' | 'black' | 'even',
+    };
+  }
+
+  if (m.status === 'finished') {
+    if (m.result === '1-0') {
+      return {
+        cp: MATE_SCORE,
+        whiteWinPct: 100,
+        blackWinPct: 0,
+        barWhitePct: 100,
+        shortScore: '1-0',
+        signedScore: '1-0',
+        favoredSide: 'white' as const,
+      };
+    }
+    if (m.result === '0-1') {
+      return {
+        cp: -MATE_SCORE,
+        whiteWinPct: 0,
+        blackWinPct: 100,
+        barWhitePct: 0,
+        shortScore: '0-1',
+        signedScore: '0-1',
+        favoredSide: 'black' as const,
+      };
+    }
+    return {
+      cp: 0,
+      whiteWinPct: 50,
+      blackWinPct: 50,
+      barWhitePct: 50,
+      shortScore: '0.0',
+      signedScore: '0.0',
+      favoredSide: 'even' as const,
+    };
+  }
+
+  let cp: number | null = null;
+  for (let i = m.moveHistory.length - 1; i >= 0; i--) {
+    const val = m.moveHistory[i]?.evalWhiteCp;
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      cp = val;
+      break;
+    }
+  }
+  if (cp === null) {
+    if (m.moveHistory.length === 0) {
+      cp = 0;
+    } else {
+      const sideScore = evaluateBoard(currentBoard.value);
+      cp = currentBoard.value.sideToMove === WHITE ? sideScore : -sideScore;
+    }
+  }
+
+  if (Math.abs(cp) >= MATE_SCORE - 1000) {
+    const mateMoves = Math.max(1, Math.ceil((MATE_SCORE - Math.abs(cp)) / 2));
+    const whiteWinning = cp > 0;
+    return {
+      cp,
+      whiteWinPct: whiteWinning ? 100 : 0,
+      blackWinPct: whiteWinning ? 0 : 100,
+      barWhitePct: whiteWinning ? 100 : 0,
+      shortScore: `M${mateMoves}`,
+      signedScore: `${whiteWinning ? '+' : '-'}M${mateMoves}`,
+      favoredSide: whiteWinning ? ('white' as const) : ('black' as const),
+    };
+  }
+
+  // Standard Stockfish/Lichess logistic win-probability curve
+  const rawWhitePct = 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+  const whiteWinPct = Math.max(1, Math.min(99, Math.round(rawWhitePct)));
+  const blackWinPct = 100 - whiteWinPct;
+  const barWhitePct = Math.max(5, Math.min(95, rawWhitePct));
+  const absPawns = Math.abs(cp) / 100;
+  const mag = absPawns >= 10 ? Math.round(absPawns).toString() : absPawns.toFixed(1);
+  const isEven = Math.abs(cp) < 5;
+
   return {
-    squares: Array.from(b.squares),
-    sideToMove: b.sideToMove,
-    inCheck: b.isInCheck(b.sideToMove),
-    lastFrom: lastMove?.from ?? -1,
-    lastTo: lastMove?.to ?? -1,
-    evalWhiteCp: lastMove?.evalWhiteCp ?? 0,
-    depth: lastMove?.depth ?? report.searchDepth,
-    nps: lastMove?.nps ?? report.matchSummary.avgNps,
-    pv: lastMove?.pv ?? [],
+    cp,
+    whiteWinPct,
+    blackWinPct,
+    barWhitePct,
+    shortScore: isEven ? '0.0' : mag,
+    signedScore: isEven ? '0.0' : `${cp > 0 ? '+' : '-'}${mag}`,
+    favoredSide: isEven ? ('even' as const) : cp > 0 ? ('white' as const) : ('black' as const),
   };
 });
 
-function stopReplayTimer() {
-  if (replayTimer) {
-    clearInterval(replayTimer);
-    replayTimer = null;
+const evalBarTooltip = computed(() =>
+  L(
+    `Live Evaluation ${positionEval.value.signedScore} · AI Swarm (White) ${positionEval.value.whiteWinPct}% vs ${match.value?.opponentName ?? 'Stockfish 19'} (Black) ${positionEval.value.blackWinPct}%`,
+    `实时局面评估 ${positionEval.value.signedScore} · AI 众筹联队（白）胜率 ${positionEval.value.whiteWinPct}% vs ${match.value?.opponentName ?? 'Stockfish 19'}（黑）胜率 ${positionEval.value.blackWinPct}%`
+  )
+);
+
+const activeTally = computed(() => {
+  const tallies = match.value?.tallies ?? [];
+  if (tallies.length === 0) return null;
+  if (previewMoveUci.value) {
+    const picked = tallies.find((t) => t.moveUci === previewMoveUci.value);
+    if (picked) return picked;
   }
-  replayPlaying.value = false;
-}
-
-function toggleReplayPlay() {
-  if (replayPlaying.value) {
-    stopReplayTimer();
-    return;
-  }
-  if (replayPly.value >= selectedGame.value.moves.length) {
-    replayPly.value = 0;
-  }
-  replayPlaying.value = true;
-  replayTimer = setInterval(() => {
-    if (replayPly.value < selectedGame.value.moves.length) {
-      replayPly.value++;
-    } else {
-      stopReplayTimer();
-    }
-  }, 850);
-}
-
-function selectRecordedGame(idx: number) {
-  stopReplayTimer();
-  selectedGameIndex.value = idx;
-  replayPly.value = Math.min(8, report.games[idx]?.moves.length ?? 0);
-}
-
-// --- Real In-Browser Classical Optimization Experiment (Opt-in, never faked) ---
-const expDepth = ref(2);
-const expSpeedMs = ref(650);
-const expRunning = ref(false);
-let expTimer: ReturnType<typeof setTimeout> | null = null;
-let sessionInstance: ChessTrainingSession | null = null;
-const expSnapshot = ref<TrainingSnapshot | null>(null);
-
-function ensureSession(): ChessTrainingSession {
-  if (!sessionInstance) {
-    sessionInstance = new ChessTrainingSession({
-      seed: 20261126,
-      depth: expDepth.value,
-      baselineElo: report.matchSummary.estimatedElo,
-    });
-    expSnapshot.value = sessionInstance.getSnapshot();
-  }
-  return sessionInstance;
-}
-
-function stopExperiment() {
-  expRunning.value = false;
-  if (expTimer) {
-    clearTimeout(expTimer);
-    expTimer = null;
-  }
-}
-
-function stepExperimentOnce() {
-  const s = ensureSession();
-  s.searchDepth = expDepth.value;
-  expSnapshot.value = s.stepMove();
-}
-
-function scheduleNextExperimentStep() {
-  if (!expRunning.value) return;
-  expTimer = setTimeout(() => {
-    if (!expRunning.value) return;
-    if (typeof document !== 'undefined' && document.hidden) {
-      stopExperiment();
-      return;
-    }
-    stepExperimentOnce();
-    scheduleNextExperimentStep();
-  }, expSpeedMs.value);
-}
-
-function toggleExperiment() {
-  if (expRunning.value) {
-    stopExperiment();
-  } else {
-    stopReplayTimer();
-    ensureSession();
-    expRunning.value = true;
-    stepExperimentOnce();
-    scheduleNextExperimentStep();
-  }
-}
-
-function resetExperiment() {
-  stopExperiment();
-  sessionInstance = new ChessTrainingSession({
-    seed: Date.now() & 0xfffffff,
-    depth: expDepth.value,
-    baselineElo: report.matchSummary.estimatedElo,
-  });
-  expSnapshot.value = sessionInstance.getSnapshot();
-}
-
-// --- Interactive Play vs Grandmaster-CI v0.1.0 ---
-let playBoard = new ChessBoard();
-const playSquares = ref<number[]>(Array.from(playBoard.squares));
-const selectedSquare = ref<number | null>(null);
-const playLastFrom = ref(-1);
-const playLastTo = ref(-1);
-const playMoves = ref<Array<{ ply: number; san: string; uci: string; evalWhiteCp: number }>>([]);
-const playEvalCp = ref(0);
-const playThinking = ref(false);
-const playStatusText = ref('');
-
-function syncPlayBoard() {
-  playSquares.value = Array.from(playBoard.squares);
-  const outcome = playBoard.getGameOutcome();
-  if (outcome.status === 'checkmate') {
-    playStatusText.value =
-      outcome.winner === WHITE
-        ? L('Checkmate — You win (1-0)!', '将杀 — 你获胜（1-0）！')
-        : L('Checkmate — Grandmaster-CI wins (0-1).', '将杀 — Grandmaster-CI 获胜（0-1）。');
-  } else if (outcome.status !== 'playing') {
-    playStatusText.value = L(`Draw (${outcome.status})`, `和棋（${outcome.status}）`);
-  } else {
-    playStatusText.value = '';
-  }
-}
-
-function resetPlayGame() {
-  playBoard = new ChessBoard();
-  selectedSquare.value = null;
-  playLastFrom.value = -1;
-  playLastTo.value = -1;
-  playMoves.value = [];
-  playEvalCp.value = 0;
-  playThinking.value = false;
-  syncPlayBoard();
-}
-
-const legalTargetsForSelected = computed<Map<number, ChessMove>>(() => {
-  const map = new Map<number, ChessMove>();
-  if (mode.value !== 'play' || selectedSquare.value === null || playThinking.value) return map;
-  if (playBoard.sideToMove !== WHITE) return map;
-  for (const m of playBoard.generateLegalMoves()) {
-    if (m.from === selectedSquare.value) {
-      // Prefer Queen promotion when clicking directly
-      if (!map.has(m.to) || m.promotion === 5) map.set(m.to, m);
-    }
-  }
-  return map;
+  return tallies[0] ?? null;
 });
 
-function handleSquareClick(sq: number) {
-  if (mode.value !== 'play' || playThinking.value) return;
-  if (playBoard.sideToMove !== WHITE) return;
-  if (playBoard.getGameOutcome().status !== 'playing') return;
+const isPreviewingLeading = computed(() => {
+  const top = match.value?.tallies[0];
+  return Boolean(top && activeTally.value && top.moveUci === activeTally.value.moveUci);
+});
 
-  const targetMove = legalTargetsForSelected.value.get(sq);
-  if (targetMove) {
-    const san = playBoard.moveToSan(targetMove);
-    playBoard.makeMove(targetMove, true);
-    playLastFrom.value = targetMove.from;
-    playLastTo.value = targetMove.to;
-    playMoves.value.push({
-      ply: playMoves.value.length + 1,
-      san,
-      uci: moveToUci(targetMove),
-      evalWhiteCp: playEvalCp.value,
-    });
-    selectedSquare.value = null;
-    syncPlayBoard();
+const isResignTally = (moveUci: string) => moveUci === CHESS_RESIGN_UCI;
 
-    if (playBoard.getGameOutcome().status === 'playing') {
-      playThinking.value = true;
-      setTimeout(() => {
-        const s = ensureSession();
-        const res = s.replyForHuman(playBoard, 3, 240);
-        if (res.bestMove) {
-          const replySan = playBoard.moveToSan(res.bestMove);
-          playBoard.makeMove(res.bestMove, true);
-          playLastFrom.value = res.bestMove.from;
-          playLastTo.value = res.bestMove.to;
-          playEvalCp.value = res.scoreWhiteCp;
-          playMoves.value.push({
-            ply: playMoves.value.length + 1,
-            san: replySan,
-            uci: moveToUci(res.bestMove),
-            evalWhiteCp: res.scoreWhiteCp,
-          });
-        }
-        playThinking.value = false;
-        syncPlayBoard();
-      }, 30);
-    }
-    return;
-  }
+const formatVoteLabel = (moveUci: string, moveSan: string) =>
+  moveUci === CHESS_RESIGN_UCI ? L('Resign', '投降') : moveSan;
 
-  const piece = playBoard.squares[sq] ?? 0;
-  if (piece > 0) {
-    selectedSquare.value = selectedSquare.value === sq ? null : sq;
-  } else {
-    selectedSquare.value = null;
-  }
+const previewingResign = computed(() => {
+  const uci = previewMoveUci.value ?? activeTally.value?.moveUci;
+  if (uci !== CHESS_RESIGN_UCI) return null;
+  const tally = match.value?.tallies.find((t) => t.moveUci === CHESS_RESIGN_UCI) ?? null;
+  if (!tally) return null;
+  return {
+    votes: tally.votes,
+    percentage: tally.percentage,
+    isLeading: match.value?.tallies[0]?.moveUci === CHESS_RESIGN_UCI,
+  };
+});
+
+const resignedGame = computed(() => {
+  const hist = match.value?.moveHistory ?? [];
+  return match.value?.status === 'finished' && hist[hist.length - 1]?.uci === CHESS_RESIGN_UCI;
+});
+
+const previewMoveInfo = computed(() => {
+  const uci = previewMoveUci.value ?? activeTally.value?.moveUci;
+  if (!uci || uci === CHESS_RESIGN_UCI) return null;
+  const move = currentBoard.value.findMoveByUci(uci);
+  if (!move) return null;
+  const tally = match.value?.tallies.find((t) => t.moveUci === uci) ?? null;
+  const leading = match.value?.tallies[0]?.moveUci === uci;
+  const fromAlg = squareToAlgebraic(move.from);
+  const toAlg = squareToAlgebraic(move.to);
+  const movingPiece = move.promotion ? move.promotion : (currentBoard.value.squares[move.from] ?? 0);
+  return {
+    uci,
+    san: tally?.moveSan ?? uci,
+    votes: tally?.votes ?? 0,
+    percentage: tally?.percentage ?? 0,
+    from: move.from,
+    to: move.to,
+    fromAlg,
+    toAlg,
+    movingPiece,
+    isLeading: leading,
+  };
+});
+
+function buildArrowGeometry(fromSq: number, toSq: number) {
+  const x1 = (fromSq % 8) * 100 + 50;
+  const y1 = (7 - Math.floor(fromSq / 8)) * 100 + 50;
+  const x2 = (toSq % 8) * 100 + 50;
+  const y2 = (7 - Math.floor(toSq / 8)) * 100 + 50;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  const px = -uy;
+  const py = ux;
+
+  const startOffset = 20;
+  const tipOffset = 8;
+  const headLen = 36;
+  const shaftHalfW = 10;
+  const headHalfW = 26;
+
+  const sx = x1 + ux * startOffset;
+  const sy = y1 + uy * startOffset;
+  const tipX = x2 - ux * tipOffset;
+  const tipY = y2 - uy * tipOffset;
+  const baseX = tipX - ux * headLen;
+  const baseY = tipY - uy * headLen;
+
+  const coords: Array<[number, number]> = [
+    [sx + px * shaftHalfW, sy + py * shaftHalfW],
+    [baseX + px * shaftHalfW, baseY + py * shaftHalfW],
+    [baseX + px * headHalfW, baseY + py * headHalfW],
+    [tipX, tipY],
+    [baseX - px * headHalfW, baseY - py * headHalfW],
+    [baseX - px * shaftHalfW, baseY - py * shaftHalfW],
+    [sx - px * shaftHalfW, sy - py * shaftHalfW],
+  ];
+  const pts = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+
+  return {
+    points: pts,
+  };
 }
 
-// --- Active View Projection (unified board + eval + telemetry) ---
-const activeSquares = computed<number[]>(() => {
-  if (mode.value === 'experiment' && expSnapshot.value) {
-    return Array.from(new ChessBoard(expSnapshot.value.fen).squares);
+const previewArrow = computed(() => {
+  if (!previewMoveInfo.value) return null;
+  return buildArrowGeometry(previewMoveInfo.value.from, previewMoveInfo.value.to);
+});
+
+const topMoveCoords = computed(() => {
+  const top = match.value?.tallies[0];
+  if (!top || top.moveUci === CHESS_RESIGN_UCI) return { from: -1, to: -1 };
+  const m = currentBoard.value.findMoveByUci(top.moveUci);
+  return m ? { from: m.from, to: m.to } : { from: -1, to: -1 };
+});
+
+const compactTopArrow = computed(() => {
+  if (topMoveCoords.value.from < 0 || topMoveCoords.value.to < 0) return null;
+  return buildArrowGeometry(topMoveCoords.value.from, topMoveCoords.value.to);
+});
+
+function selectPreviewMove(moveUci: string) {
+  previewMoveUci.value = moveUci;
+}
+
+const lastMoveCoords = computed(() => {
+  const hist = match.value?.moveHistory ?? [];
+  const last = hist[hist.length - 1];
+  if (!last || !/^[a-h][1-8][a-h][1-8][qrbn]?$/i.test(last.uci)) return { from: -1, to: -1 };
+  const parseSq = (alg: string) => {
+    const file = alg.charCodeAt(0) - 97;
+    const rank = Number(alg[1]) - 1;
+    return rank * 8 + file;
+  };
+  return { from: parseSq(last.uci.slice(0, 2)), to: parseSq(last.uci.slice(2, 4)) };
+});
+
+function squareBgClass(sq: number, isLight: boolean): string {
+  const isHighlighted = lastMoveCoords.value.from === sq || lastMoveCoords.value.to === sq;
+  if (isHighlighted) {
+    return isLight ? 'bg-[#f5f682]' : 'bg-[#baca2b]';
   }
-  if (mode.value === 'play') return playSquares.value;
-  return replayBoardState.value.squares;
-});
+  return isLight ? 'bg-[#eeeed2]' : 'bg-[#769656]';
+}
 
-const activeLastFrom = computed(() => {
-  if (mode.value === 'experiment') return expSnapshot.value?.lastMove?.from ?? -1;
-  if (mode.value === 'play') return playLastFrom.value;
-  return replayBoardState.value.lastFrom;
-});
-
-const activeLastTo = computed(() => {
-  if (mode.value === 'experiment') return expSnapshot.value?.lastMove?.to ?? -1;
-  if (mode.value === 'play') return playLastTo.value;
-  return replayBoardState.value.lastTo;
-});
-
-const activeEvalCp = computed(() => {
-  if (mode.value === 'experiment') return expSnapshot.value?.evalWhiteCp ?? 0;
-  if (mode.value === 'play') return playEvalCp.value;
-  return replayBoardState.value.evalWhiteCp;
-});
-
-const whiteEvalBarPct = computed(() => {
-  const cp = Math.max(-900, Math.min(900, activeEvalCp.value));
-  const sigmoid = 1 / (1 + Math.exp(-cp / 260));
-  return Math.round(sigmoid * 100);
-});
-
-const evalDisplay = computed(() => {
-  const cp = activeEvalCp.value;
-  if (Math.abs(cp) >= 29_000) return cp > 0 ? '+M' : '-M';
-  const pawns = (cp / 100).toFixed(2);
-  return cp >= 0 ? `+${pawns}` : pawns;
-});
-
-const activeDepth = computed(() => {
-  if (mode.value === 'experiment') return expSnapshot.value?.currentDepth || expDepth.value;
-  if (mode.value === 'play') return 3;
-  return replayBoardState.value.depth;
-});
-
-const activeNps = computed(() => {
-  if (mode.value === 'experiment') return expSnapshot.value?.currentNps ?? 0;
-  return replayBoardState.value.nps;
-});
-
-const activePv = computed(() => {
-  if (mode.value === 'experiment') return expSnapshot.value?.pv ?? [];
-  if (mode.value === 'replay') return replayBoardState.value.pv;
-  return [];
-});
-
-// --- Elo Chart Data (combines real Phase 0 benchmark + live browser experiment points) ---
-const eloChartPoints = computed(() => {
-  const base = report.eloHistory.map((p, idx) => ({
-    idx,
-    label: p.version,
-    elo: p.elo,
-    note: state.locale === 'zh' ? p.noteZh : p.noteEn,
-  }));
-  if (expSnapshot.value && expSnapshot.value.eloHistory.length > 1) {
-    for (const pt of expSnapshot.value.eloHistory.slice(1)) {
-      base.push({
-        idx: base.length,
-        label: `Exp#${pt.gameNumber}`,
-        elo: pt.elo,
-        note: state.locale === 'zh' ? pt.openingZh : pt.openingEn,
-      });
-    }
-  }
-  return base;
-});
-
-const eloSvgPath = computed(() => {
-  const pts = eloChartPoints.value;
-  if (pts.length < 2) return { path: '', coords: [] as Array<{ x: number; y: number; elo: number; label: string }> };
-  const w = 320;
-  const h = 92;
-  const padX = 18;
-  const padY = 14;
-  const minElo = Math.min(...pts.map((p) => p.elo)) - 40;
-  const maxElo = Math.max(...pts.map((p) => p.elo)) + 40;
-  const span = Math.max(1, maxElo - minElo);
-  const coords = pts.map((p, i) => {
-    const x = padX + (i / (pts.length - 1)) * (w - padX * 2);
-    const y = h - padY - ((p.elo - minElo) / span) * (h - padY * 2);
-    return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, elo: p.elo, label: p.label };
-  });
-  const path = coords.map((c, i) => `${i === 0 ? 'M' : 'L'} ${c.x} ${c.y}`).join(' ');
-  return { path, coords };
-});
-
-// Visual piece glyphs (crisp Unicode chess pieces with high-contrast styling)
-const PIECE_GLYPHS: Record<number, string> = {
-  1: '♙', 2: '♘', 3: '♗', 4: '♖', 5: '♕', 6: '♔',
-  [-1]: '♟', [-2]: '♞', [-3]: '♝', [-4]: '♜', [-5]: '♛', [-6]: '♚',
-};
-
-// Render visual ranks 7..0 (rank 8 at top, rank 1 at bottom), files 0..7 (a..h)
 const boardCells = computed(() => {
+  const sqArr = Array.from(currentBoard.value.squares);
   const cells: Array<{ sq: number; rank: number; file: number; isLight: boolean; piece: number }> = [];
   for (let rank = 7; rank >= 0; rank--) {
     for (let file = 0; file < 8; file++) {
@@ -395,629 +344,755 @@ const boardCells = computed(() => {
         rank,
         file,
         isLight: (rank + file) % 2 === 1,
-        piece: activeSquares.value[sq] ?? 0,
+        piece: sqArr[sq] ?? 0,
       });
     }
   }
   return cells;
 });
 
-// Active move pairs for PGN-style display
-const activeMoveRows = computed(() => {
-  const src =
-    mode.value === 'experiment'
-      ? (expSnapshot.value?.moves ?? []).map((m) => ({ ply: m.ply, san: m.san, evalWhiteCp: m.evalWhiteCp }))
-      : mode.value === 'play'
-        ? playMoves.value
-        : selectedGame.value.moves.map((m) => ({ ply: m.ply, san: m.san, evalWhiteCp: m.evalWhiteCp }));
-  const rows: Array<{ moveNo: number; white?: { ply: number; san: string }; black?: { ply: number; san: string } }> = [];
-  for (let i = 0; i < src.length; i += 2) {
+const moveRows = computed(() => {
+  const hist = match.value?.moveHistory ?? [];
+  const rows: Array<{ moveNo: number; white?: string; black?: string }> = [];
+  for (let i = 0; i < hist.length; i += 2) {
     rows.push({
       moveNo: Math.floor(i / 2) + 1,
-      white: src[i],
-      black: src[i + 1],
+      white: hist[i]?.san,
+      black: hist[i + 1]?.san,
     });
   }
   return rows;
 });
 
-const realContributions = computed(() => props.contributions.filter((c) => !c.isDemo));
+async function triggerResolveRound() {
+  if (resolving.value || !match.value || match.value.totalVotesThisRound === 0) return;
+  if (state.dataMode === 'api' && !state.user) {
+    notify(L('Sign in with GitHub to advance the round.', '登录后可结算本轮。'));
+    return;
+  }
+  resolving.value = true;
+  try {
+    const res = await apiClient.resolveChessRound(props.slug);
+    match.value = res.match;
+    previewMoveUci.value = null;
+    updateCountdown();
+    const replyMsg =
+      res.collectiveMove.uci === CHESS_RESIGN_UCI
+        ? L(
+            'AI Swarm voted to resign (0-1). Ready to start the next game!',
+            'AI 众筹联队投票选择投降（0-1），本局结束，可开启下一局！'
+          )
+        : res.stockfishReply
+          ? L(
+              `Played ${res.collectiveMove.san} → Stockfish replied ${res.stockfishReply.san}!`,
+              `群智落子 ${res.collectiveMove.san} → Stockfish 应招 ${res.stockfishReply.san}！`
+            )
+          : L(`Played ${res.collectiveMove.san}! Game over.`, `群智落子 ${res.collectiveMove.san}！本局结束。`);
+    notify(replyMsg);
+  } catch {
+    notify(L('Could not resolve round yet.', '暂无法结算本轮。'));
+  } finally {
+    resolving.value = false;
+  }
+}
 
-watch(mode, (next) => {
-  if (next !== 'replay') stopReplayTimer();
-  if (next !== 'experiment') stopExperiment();
-  if (next === 'experiment') ensureSession();
+async function startNextGame() {
+  match.value = await apiClient.startNewChessGame(props.slug);
+  previewMoveUci.value = null;
+  updateCountdown();
+  notify(L(`Started Game #${match.value.gameNumber}!`, `已开启第 ${match.value.gameNumber} 局！`));
+}
+
+watch(
+  () => `${match.value?.gameNumber ?? 0}:${match.value?.roundNumber ?? 0}:${match.value?.fen ?? ''}`,
+  () => {
+    previewMoveUci.value = null;
+  }
+);
+
+watch(() => props.slug, () => {
+  void loadMatch();
 });
 
 onMounted(() => {
-  // Start replay paused at ply 10 of Game 1 so visitors immediately see a rich real middlegame position
-  replayPly.value = Math.min(10, selectedGame.value.moves.length);
+  void loadMatch();
+  countdownTimer = setInterval(updateCountdown, 1000);
+  if (!props.compact) {
+    pollTimer = setInterval(() => {
+      if (!document.hidden) void loadMatch(true);
+    }, 10000);
+  }
 });
 
 onBeforeUnmount(() => {
-  stopReplayTimer();
-  stopExperiment();
+  if (countdownTimer) clearInterval(countdownTimer);
+  if (pollTimer) clearInterval(pollTimer);
 });
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Mode Selector & Honest Experiment Status Banner -->
-    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border-light pb-4 dark:border-border-dark">
-      <div class="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Chess showcase modes">
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'replay'"
-          class="inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition cursor-pointer"
-          :class="
-            mode === 'replay'
-              ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
-              : 'border border-border-light bg-paper text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted'
-          "
-          @click="mode = 'replay'"
+  <!-- Compact Preview Mode (used on HomePage card) -->
+  <div v-if="compact" class="space-y-3">
+    <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] items-center gap-3">
+      <div class="grid grid-cols-[10px_minmax(0,1fr)] items-stretch gap-1.5">
+        <!-- Mini Chess.com Eval Bar -->
+        <div
+          class="relative h-full w-full overflow-hidden rounded-[3px] bg-[#403d39] ring-1 ring-black/20"
+          :title="evalBarTooltip"
+          aria-hidden="true"
         >
-          <History class="h-3.5 w-3.5" />
-          <span>{{ L('Recorded Baseline Replay', '真实基准对局回放') }}</span>
-        </button>
+          <div
+            class="absolute inset-x-0 bottom-0 bg-[#f6f6f4] transition-[height] duration-500 ease-out"
+            :style="{ height: `${positionEval.barWhitePct}%` }"
+          />
+          <div class="pointer-events-none absolute inset-x-0 top-1/2 h-px bg-black/25" />
+        </div>
 
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'experiment'"
-          class="inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition cursor-pointer"
-          :class="
-            mode === 'experiment'
-              ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
-              : 'border border-border-light bg-paper text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted'
-          "
-          @click="mode = 'experiment'"
-        >
-          <FlaskConical class="h-3.5 w-3.5" />
-          <span>{{ L('Run Search/Eval Experiment', '运行真实算法优化实验') }}</span>
-        </button>
-
-        <button
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'play'"
-          class="inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition cursor-pointer"
-          :class="
-            mode === 'play'
-              ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
-              : 'border border-border-light bg-paper text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted'
-          "
-          @click="mode = 'play'"
-        >
-          <Gamepad2 class="h-3.5 w-3.5" />
-          <span>{{ L('Play vs Engine', '与当前引擎对弈') }}</span>
-        </button>
+        <div class="relative aspect-square w-full overflow-hidden rounded-[6px] shadow-sm ring-1 ring-black/15 dark:ring-white/10">
+          <div class="grid h-full w-full grid-cols-8 grid-rows-8">
+            <div
+              v-for="cell in boardCells"
+              :key="cell.sq"
+              class="flex aspect-square min-h-0 min-w-0 items-center justify-center overflow-hidden"
+              :class="[
+                cell.sq === lastMoveCoords.from || cell.sq === lastMoveCoords.to
+                  ? cell.isLight
+                    ? 'bg-[#f5f682]'
+                    : 'bg-[#baca2b]'
+                  : cell.isLight
+                    ? 'bg-[#eeeed2]'
+                    : 'bg-[#769656]',
+              ]"
+            >
+              <ChessPieceIcon v-if="cell.piece !== 0" :piece="cell.piece" />
+            </div>
+          </div>
+          <svg
+            v-if="compactTopArrow"
+            viewBox="0 0 800 800"
+            class="pointer-events-none absolute inset-0 h-full w-full drop-shadow-[0_2px_3px_rgba(0,0,0,0.45)]"
+            aria-hidden="true"
+          >
+            <polygon
+              :points="compactTopArrow.points"
+              fill="#f97316"
+              fill-opacity="0.95"
+              stroke="#18181b"
+              stroke-opacity="0.72"
+              stroke-width="8"
+              stroke-linejoin="round"
+              paint-order="stroke fill"
+            />
+          </svg>
+        </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2 text-xs">
-        <StatusPill
-          :label="L('Classical Search & Eval · Non-ML', '传统搜索与评估优化 · 非机器学习训练')"
-          tone="info"
-          :mono="false"
-        />
-        <StatusPill
-          :label="
-            expRunning
-              ? L('Live Experiment Running', '实时实验运行中')
-              : L('No Live Run · Real Replay', '无实时实验 · 展示最近真实基准')
-          "
-          :tone="expRunning ? 'accent' : 'neutral'"
-          :mono="false"
-        />
+      <div class="space-y-2 text-xs">
+        <div class="flex items-center justify-between font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
+          <span>{{ L(`Round ${match?.roundNumber ?? 1}`, `第 ${match?.roundNumber ?? 1} 回合`) }}</span>
+          <span class="font-semibold text-accent dark:text-accent-dark">{{ countdownText }}</span>
+        </div>
+        <div v-for="item in match?.tallies.slice(0, 3) ?? []" :key="item.moveUci" class="space-y-1">
+          <div class="flex items-center justify-between font-mono text-xs">
+            <strong :class="isResignTally(item.moveUci) ? 'text-rose-600 dark:text-rose-400' : 'text-ink dark:text-chalk'">
+              {{ formatVoteLabel(item.moveUci, item.moveSan) }}
+            </strong>
+            <span class="text-ink-muted dark:text-chalk-muted">{{ item.votes }} ({{ item.percentage }}%)</span>
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
+            <div
+              class="h-full rounded-full"
+              :class="isResignTally(item.moveUci) ? 'bg-rose-500' : 'bg-accent dark:bg-accent-dark'"
+              :style="{ width: `${item.percentage}%` }"
+            />
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Main Two-Column Arena: Left = Board + Eval Bar + Controls, Right = Real Metrics, Elo Curve, Games & Moves -->
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,1fr)]">
-      <!-- LEFT: Real Chessboard + Eval Bar + Mode Controls -->
+    <div v-if="match" class="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-muted dark:text-chalk-muted">
+      <span class="inline-flex items-center gap-1.5 font-mono font-medium text-ink dark:text-chalk">
+        <Users class="h-3.5 w-3.5 text-indigo-500" />
+        {{ match.totalVotesThisRound }} {{ L('votes this round', '票本轮已投') }}
+      </span>
+      <span class="font-mono text-[11px] tabular-nums">
+        {{ L('Win', '胜率') }}
+        <strong class="text-ink dark:text-chalk">{{ positionEval.whiteWinPct }}%</strong>
+        / {{ positionEval.blackWinPct }}%
+        <span class="text-ink-faint dark:text-chalk-faint">({{ positionEval.signedScore }})</span>
+      </span>
+    </div>
+  </div>
+
+  <!-- Full Interactive Collective Vote Chess Arena -->
+  <div v-else class="space-y-5">
+    <!-- Match Header Bar -->
+    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-500/25 bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-amber-500/10 p-4 dark:border-indigo-400/25">
+      <div class="flex flex-wrap items-center gap-2.5">
+        <div class="flex items-center gap-2 rounded-lg bg-surface px-3 py-1.5 shadow-xs dark:bg-obsidian-surface">
+          <span class="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span class="font-display text-sm font-bold text-ink dark:text-chalk">
+            {{ L('AI Swarm (White)', 'AI 众筹联队（白）') }}
+          </span>
+        </div>
+
+        <span class="inline-flex items-center gap-1 font-display text-xs font-extrabold uppercase text-amber-600 dark:text-amber-400">
+          <Swords class="h-4 w-4" /> VS
+        </span>
+
+        <div class="flex items-center gap-2 rounded-lg bg-surface px-3 py-1.5 shadow-xs dark:bg-obsidian-surface">
+          <Trophy class="h-3.5 w-3.5 text-amber-500" />
+          <span class="font-display text-sm font-bold text-ink dark:text-chalk">
+            {{ match?.opponentName ?? 'Stockfish 19' }}
+          </span>
+          <span class="font-mono text-xs text-ink-muted dark:text-chalk-muted">{{ L('(Black)', '（黑）') }}</span>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <span class="rounded-lg border border-border-light bg-surface px-3 py-1.5 font-mono font-semibold text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk">
+          {{ L(`Game #${match?.gameNumber ?? 1} · Round ${match?.roundNumber ?? 1}`, `第 ${match?.gameNumber ?? 1} 局 · 第 ${match?.roundNumber ?? 1} 回合`) }}
+        </span>
+        <span class="inline-flex items-center gap-1.5 rounded-lg border border-border-light bg-surface px-3 py-1.5 font-mono font-bold text-accent dark:border-border-dark dark:bg-obsidian-surface dark:text-accent-dark">
+          <Clock class="h-3.5 w-3.5" />
+          {{ countdownText }}
+        </span>
+        <button
+          type="button"
+          class="rounded-lg border border-border-light bg-surface p-1.5 text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian-surface cursor-pointer"
+          :title="L('Refresh', '刷新')"
+          @click="loadMatch(true)"
+        >
+          <RefreshCw class="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+
+    <div v-if="loading && !match" class="py-8 text-center text-sm text-ink-muted dark:text-chalk-muted">
+      {{ L('Loading live match…', '加载实时棋局中…') }}
+    </div>
+
+    <div v-else-if="match" class="grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+      <!-- LEFT: Chess.com-style Board Arena + Eval Bar + Preview Banner -->
       <div class="space-y-3">
-        <div class="flex gap-2.5">
-          <!-- Vertical Evaluation Bar -->
-          <div
-            class="flex w-7 shrink-0 flex-col overflow-hidden rounded border border-border-light bg-obsidian dark:border-border-dark"
-            :title="L(`Evaluation (White perspective): ${evalDisplay}`, `白方视角评估：${evalDisplay}`)"
-          >
-            <div
-              class="w-full bg-zinc-800 transition-all duration-300"
-              :style="{ height: `${100 - whiteEvalBarPct}%` }"
-            />
-            <div
-              class="w-full bg-stone-100 transition-all duration-300"
-              :style="{ height: `${whiteEvalBarPct}%` }"
-            />
+        <div class="w-full max-w-[504px] space-y-2 rounded-xl border border-border-light bg-[#f3f2ef] p-2.5 shadow-sm dark:border-border-dark dark:bg-[#262421]">
+          <!-- Top Player Bar: Stockfish 19 (Black) + Real-time Win Rate -->
+          <div class="flex items-center justify-between gap-2 px-0.5">
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-[#3b3936] ring-1 ring-white/10">
+                <ChessPieceIcon :piece="-6" />
+              </div>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="truncate text-xs font-bold text-[#262421] dark:text-[#f1f1f1]">
+                  {{ match.opponentName }}
+                </span>
+                <span class="rounded bg-black/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#4a4845] dark:bg-white/10 dark:text-[#c7c5c2]">
+                  BOT · 3600
+                </span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span
+                class="rounded bg-[#312e2b] px-2 py-0.5 font-mono text-[11px] font-bold tabular-nums text-[#f1f1f1]"
+                :title="evalBarTooltip"
+              >
+                {{ L('Win', '胜率') }} {{ positionEval.blackWinPct }}%
+              </span>
+              <span class="rounded bg-[#312e2b]/80 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#bababa]">
+                {{ L('Black', '黑方') }}
+              </span>
+            </div>
           </div>
 
-          <!-- 8x8 Interactive Chessboard -->
-          <div class="flex-1">
+          <!-- Chess.com Vertical Eval Bar + Classic 8x8 Board -->
+          <div class="grid grid-cols-[30px_minmax(0,1fr)] items-stretch gap-2">
+            <!-- Chess.com-style Vertical Evaluation & Win-Rate Bar -->
             <div
-              class="grid aspect-square w-full max-w-[440px] grid-cols-8 overflow-hidden rounded-md border border-border-light shadow-xs select-none dark:border-border-dark"
-              role="grid"
-              :aria-label="L('Grandmaster-CI live chessboard', 'Grandmaster-CI 国际象棋棋盘')"
+              data-eval-bar
+              role="meter"
+              :aria-label="evalBarTooltip"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="positionEval.whiteWinPct"
+              :title="evalBarTooltip"
+              class="relative h-full w-full overflow-hidden rounded-[4px] bg-[#403d39] shadow-md ring-1 ring-black/25 select-none"
             >
-              <button
+              <!-- White (AI Swarm) Advantage Fill Rising from Bottom -->
+              <div
+                data-eval-fill
+                class="absolute inset-x-0 bottom-0 bg-[#f6f6f4] transition-[height] duration-500 ease-out"
+                :style="{ height: `${positionEval.barWhitePct}%` }"
+              />
+
+              <!-- Subtle 50% Midpoint Line -->
+              <div class="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-px bg-black/25" />
+
+              <!-- Top (Black / Stockfish 19) Win Rate & Score -->
+              <div
+                v-if="positionEval.barWhitePct <= 88"
+                class="pointer-events-none absolute inset-x-0 top-1 z-20 flex flex-col items-center gap-0.5 px-0.5 text-center font-mono leading-none tabular-nums"
+              >
+                <span class="text-[9px] font-bold text-[#f1f1f1]/90">
+                  {{ positionEval.blackWinPct }}%
+                </span>
+                <span
+                  v-if="positionEval.favoredSide === 'black'"
+                  class="text-[9.5px] font-extrabold text-white"
+                >
+                  {{ positionEval.shortScore }}
+                </span>
+              </div>
+
+              <!-- Bottom (White / AI Swarm) Score & Win Rate -->
+              <div
+                v-if="positionEval.barWhitePct >= 12"
+                class="pointer-events-none absolute inset-x-0 bottom-1 z-20 flex flex-col items-center gap-0.5 px-0.5 text-center font-mono leading-none tabular-nums"
+              >
+                <span
+                  v-if="positionEval.favoredSide !== 'black'"
+                  class="text-[9.5px] font-extrabold text-[#262421]"
+                >
+                  {{ positionEval.shortScore }}
+                </span>
+                <span class="text-[9px] font-bold text-[#262421]/85">
+                  {{ positionEval.whiteWinPct }}%
+                </span>
+              </div>
+            </div>
+
+            <!-- Classic Chess.com 8x8 Board -->
+            <div
+              class="relative aspect-square w-full overflow-hidden rounded-[5px] shadow-md ring-1 ring-black/20 select-none"
+              role="grid"
+              :aria-label="L('Collective AI Vote Chess board', 'AI 众筹投票国际象棋棋盘')"
+            >
+            <div class="grid h-full w-full grid-cols-8 grid-rows-8">
+              <div
                 v-for="cell in boardCells"
                 :key="cell.sq"
-                type="button"
-                class="relative flex items-center justify-center text-[clamp(1.25rem,3.4vw,2.2rem)] leading-none transition-colors"
+                class="relative flex aspect-square min-h-0 min-w-0 items-center justify-center overflow-hidden"
                 :class="[
-                  cell.isLight
-                    ? 'bg-[#EAE7DC] dark:bg-[#B8B4A6]'
-                    : 'bg-[#5E7C74] dark:bg-[#38554E]',
-                  cell.sq === activeLastFrom || cell.sq === activeLastTo
-                    ? 'ring-2 ring-inset ring-amber-400/90 bg-amber-200/75 dark:bg-amber-500/45'
+                  squareBgClass(cell.sq, cell.isLight),
+                  previewMoveInfo && (cell.sq === previewMoveInfo.from || cell.sq === previewMoveInfo.to)
+                    ? previewMoveInfo.isLeading
+                      ? 'ring-[3px] ring-inset ring-[#ea580c]'
+                      : 'ring-[3px] ring-inset ring-[#0284c7]'
                     : '',
-                  selectedSquare === cell.sq ? 'ring-2 ring-inset ring-accent dark:ring-accent-dark' : '',
-                  mode === 'play' ? 'cursor-pointer' : 'cursor-default',
                 ]"
                 :aria-label="squareToAlgebraic(cell.sq)"
-                @click="handleSquareClick(cell.sq)"
               >
-                <!-- Rank / File coordinates -->
+                <!-- Subtle Chess.com-style candidate tint -->
+                <span
+                  v-if="previewMoveInfo && (cell.sq === previewMoveInfo.from || cell.sq === previewMoveInfo.to)"
+                  class="pointer-events-none absolute inset-0"
+                  :class="
+                    previewMoveInfo.isLeading
+                      ? cell.sq === previewMoveInfo.to
+                        ? 'bg-[#f97316]/32'
+                        : 'bg-[#f97316]/18'
+                      : cell.sq === previewMoveInfo.to
+                        ? 'bg-[#0284c7]/32'
+                        : 'bg-[#0284c7]/18'
+                  "
+                />
+
+                <!-- Rank coordinate (1-8) in Chess.com alternating green/cream -->
                 <span
                   v-if="cell.file === 0"
-                  class="pointer-events-none absolute top-0.5 left-1 font-mono text-[9px] font-semibold opacity-70"
-                  :class="cell.isLight ? 'text-stone-700' : 'text-stone-100'"
+                  class="pointer-events-none absolute top-[2px] left-[3px] z-20 font-sans text-[10px] font-bold leading-none sm:text-[11px]"
+                  :class="cell.isLight ? 'text-[#769656]' : 'text-[#eeeed2]'"
                 >
                   {{ cell.rank + 1 }}
                 </span>
+                <!-- File coordinate (a-h) in Chess.com alternating green/cream -->
                 <span
                   v-if="cell.rank === 0"
-                  class="pointer-events-none absolute right-1 bottom-0.5 font-mono text-[9px] font-semibold opacity-70"
-                  :class="cell.isLight ? 'text-stone-700' : 'text-stone-100'"
+                  class="pointer-events-none absolute right-[3px] bottom-[2px] z-20 font-sans text-[10px] font-bold leading-none sm:text-[11px]"
+                  :class="cell.isLight ? 'text-[#769656]' : 'text-[#eeeed2]'"
                 >
                   {{ String.fromCharCode(97 + cell.file) }}
                 </span>
 
-                <!-- Legal move dot in Play mode -->
+                <!-- Target move SAN pill on destination square -->
                 <span
-                  v-if="legalTargetsForSelected.has(cell.sq) && cell.piece === 0"
-                  class="h-2.5 w-2.5 rounded-full bg-accent/70 dark:bg-accent-dark/80"
-                />
-                <span
-                  v-else-if="legalTargetsForSelected.has(cell.sq) && cell.piece !== 0"
-                  class="pointer-events-none absolute inset-1 rounded-full border-2 border-accent/80 dark:border-accent-dark"
-                />
-
-                <!-- Chess Piece -->
-                <span
-                  v-if="cell.piece !== 0"
-                  class="drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]"
-                  :class="cell.piece > 0 ? 'text-white' : 'text-zinc-950'"
+                  v-if="previewMoveInfo && cell.sq === previewMoveInfo.to"
+                  class="pointer-events-none absolute top-[2px] right-[2px] z-20 rounded-[3px] px-1 py-px font-mono text-[9px] font-bold leading-tight text-white shadow-xs"
+                  :class="previewMoveInfo.isLeading ? 'bg-[#d97706]/95' : 'bg-[#0284c7]/95'"
                 >
-                  {{ PIECE_GLYPHS[cell.piece] }}
+                  {{ previewMoveInfo.san }}
                 </span>
-              </button>
-            </div>
-          </div>
-        </div>
 
-        <!-- Telemetry Strip directly below board -->
-        <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border-light bg-paper px-3 py-2 font-mono text-xs dark:border-border-dark dark:bg-obsidian">
-          <div class="flex flex-wrap items-center gap-3">
-            <span>
-              <span class="text-ink-faint dark:text-chalk-faint">Eval:</span>
-              <strong class="ml-1 text-ink dark:text-chalk">{{ evalDisplay }}</strong>
-            </span>
-            <span>
-              <span class="text-ink-faint dark:text-chalk-faint">Depth:</span>
-              <strong class="ml-1 text-ink dark:text-chalk">{{ activeDepth }}</strong>
-            </span>
-            <span>
-              <span class="text-ink-faint dark:text-chalk-faint">Speed:</span>
-              <strong class="ml-1 text-ink dark:text-chalk">
-                {{ activeNps >= 1000 ? `${(activeNps / 1000).toFixed(1)}k` : activeNps }} nps
-              </strong>
-            </span>
-          </div>
-          <div v-if="activePv.length > 0" class="truncate text-[11px] text-ink-muted dark:text-chalk-muted">
-            PV: {{ activePv.slice(0, 6).join(' ') }}
-          </div>
-        </div>
+                <!-- Capture ring for previewed move -->
+                <span
+                  v-if="previewMoveInfo && cell.sq === previewMoveInfo.to && cell.piece !== 0"
+                  class="pointer-events-none absolute inset-[6%] z-10 rounded-full border-[4px] border-dashed"
+                  :class="previewMoveInfo.isLeading ? 'border-[#ffa800]' : 'border-[#2d9cdb]'"
+                />
 
-        <!-- Mode-Specific Controls -->
-        <div
-          v-if="mode === 'replay'"
-          class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border-light bg-surface p-3 dark:border-border-dark dark:bg-obsidian-surface"
-        >
-          <div class="flex items-center gap-1">
-            <button
-              type="button"
-              class="rounded border border-border-light p-1.5 text-ink hover:bg-subtle dark:border-border-dark dark:text-chalk dark:hover:bg-obsidian-subtle cursor-pointer"
-              :title="L('Start of game', '回到开局')"
-              @click="stopReplayTimer(); replayPly = 0"
-            >
-              <SkipBack class="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              class="rounded border border-border-light p-1.5 text-ink hover:bg-subtle dark:border-border-dark dark:text-chalk dark:hover:bg-obsidian-subtle cursor-pointer"
-              :title="L('Previous move', '上一步')"
-              @click="stopReplayTimer(); replayPly = Math.max(0, replayPly - 1)"
-            >
-              <ChevronLeft class="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:opacity-90 dark:bg-chalk dark:text-obsidian cursor-pointer"
-              @click="toggleReplayPlay"
-            >
-              <Pause v-if="replayPlaying" class="h-3.5 w-3.5" />
-              <Play v-else class="h-3.5 w-3.5" />
-              <span>{{ replayPlaying ? L('Pause', '暂停') : L('Play Replay', '播放回放') }}</span>
-            </button>
-            <button
-              type="button"
-              class="rounded border border-border-light p-1.5 text-ink hover:bg-subtle dark:border-border-dark dark:text-chalk dark:hover:bg-obsidian-subtle cursor-pointer"
-              :title="L('Next move', '下一步')"
-              @click="stopReplayTimer(); replayPly = Math.min(selectedGame.moves.length, replayPly + 1)"
-            >
-              <ChevronRight class="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              class="rounded border border-border-light p-1.5 text-ink hover:bg-subtle dark:border-border-dark dark:text-chalk dark:hover:bg-obsidian-subtle cursor-pointer"
-              :title="L('End of game', '跳至终局')"
-              @click="stopReplayTimer(); replayPly = selectedGame.moves.length"
-            >
-              <SkipForward class="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div class="font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-            {{ L(`Game #${selectedGame.gameNumber}`, `第 ${selectedGame.gameNumber} 局`) }} ·
-            {{ replayPly }} / {{ selectedGame.moves.length }} plies ·
-            {{ selectedGame.result }}
-          </div>
-        </div>
+                <!-- Ghost Staunton SVG piece preview on empty destination square -->
+                <ChessPieceIcon
+                  v-if="
+                    previewMoveInfo &&
+                    cell.sq === previewMoveInfo.to &&
+                    cell.piece === 0 &&
+                    previewMoveInfo.movingPiece !== 0
+                  "
+                  :piece="previewMoveInfo.movingPiece"
+                  class="pointer-events-none z-10 opacity-40"
+                />
 
-        <div
-          v-else-if="mode === 'experiment'"
-          class="space-y-2.5 rounded-md border border-border-light bg-surface p-3 dark:border-border-dark dark:bg-obsidian-surface"
-        >
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:opacity-90 dark:bg-chalk dark:text-obsidian cursor-pointer"
-                @click="toggleExperiment"
-              >
-                <Pause v-if="expRunning" class="h-3.5 w-3.5" />
-                <Play v-else class="h-3.5 w-3.5" />
-                <span>{{ expRunning ? L('Pause Experiment', '暂停实验') : L('Start Real Experiment', '启动真实自对弈实验') }}</span>
-              </button>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded border border-border-light px-2.5 py-1.5 text-xs text-ink hover:bg-subtle dark:border-border-dark dark:text-chalk dark:hover:bg-obsidian-subtle cursor-pointer"
-                :disabled="expRunning"
-                @click="stepExperimentOnce"
-              >
-                <StepForward class="h-3.5 w-3.5" />
-                <span>{{ L('Step 1 Move', '单步搜索') }}</span>
-              </button>
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded border border-border-light px-2.5 py-1.5 text-xs text-ink-muted hover:text-ink dark:border-border-dark dark:text-chalk-muted cursor-pointer"
-                @click="resetExperiment"
-              >
-                <RotateCcw class="h-3.5 w-3.5" />
-                <span>{{ L('Reset', '重置') }}</span>
-              </button>
+                <!-- Crisp Staunton SVG Chess Piece -->
+                <ChessPieceIcon
+                  v-if="cell.piece !== 0"
+                  :piece="cell.piece"
+                  class="relative z-10"
+                />
+              </div>
             </div>
 
-            <div class="flex items-center gap-2 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-              <label class="inline-flex items-center gap-1">
-                <span>Depth</span>
-                <select
-                  v-model.number="expDepth"
-                  class="rounded border border-border-light bg-paper px-1.5 py-0.5 text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-                >
-                  <option :value="2">2</option>
-                  <option :value="3">3</option>
-                </select>
-              </label>
-              <label class="inline-flex items-center gap-1">
-                <span>Pace</span>
-                <select
-                  v-model.number="expSpeedMs"
-                  class="rounded border border-border-light bg-paper px-1.5 py-0.5 text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-                >
-                  <option :value="1000">1.0s</option>
-                  <option :value="650">0.65s</option>
-                  <option :value="250">0.25s</option>
-                </select>
-              </label>
+            <!-- High-Contrast Seamless Directional Arrow Overlay -->
+            <svg
+              v-if="previewArrow && previewMoveInfo"
+              data-preview-arrow
+              :data-move="previewMoveInfo.uci"
+              viewBox="0 0 800 800"
+              class="pointer-events-none absolute inset-0 z-[15] h-full w-full opacity-95 drop-shadow-[0_2px_4px_rgba(0,0,0,0.48)] transition-opacity duration-150"
+              aria-hidden="true"
+            >
+              <polygon
+                :points="previewArrow.points"
+                :fill="previewMoveInfo.isLeading ? '#f97316' : '#0284c7'"
+                fill-opacity="0.94"
+                stroke="#18181b"
+                stroke-opacity="0.78"
+                stroke-width="7"
+                stroke-linejoin="round"
+                paint-order="stroke fill"
+              />
+            </svg>
             </div>
           </div>
 
-          <div v-if="expSnapshot" class="space-y-1 text-xs text-ink-muted dark:text-chalk-muted">
-            <div class="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
-              <span>
-                Gen #{{ expSnapshot.generation }} · {{ L('Testing', '受测权重') }}:
-                <strong class="text-ink dark:text-chalk">{{ expSnapshot.candidateDeltaSummary }}</strong>
+          <!-- Bottom Player Bar: AI Swarm (White) + Real-time Win Rate + Chess.com Digital Clock -->
+          <div class="flex items-center justify-between gap-2 px-0.5">
+            <div class="flex items-center gap-2 min-w-0">
+              <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] bg-[#eeeed2] ring-1 ring-black/15">
+                <ChessPieceIcon :piece="6" />
+              </div>
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="truncate text-xs font-bold text-[#262421] dark:text-[#f1f1f1]">
+                  {{ L('AI Swarm', 'AI 众筹联队') }}
+                </span>
+                <span class="rounded bg-[#81b64c]/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#4e7828] dark:text-[#a8dc6f]">
+                  {{ match.totalVotesThisRound }} {{ L('votes', '票') }}
+                </span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span
+                class="rounded bg-white px-2 py-1 font-mono text-[11px] font-bold tabular-nums text-[#262421] shadow-xs ring-1 ring-black/10"
+                :title="evalBarTooltip"
+              >
+                {{ L('Win', '胜率') }} {{ positionEval.whiteWinPct }}%
               </span>
-              <span>
-                W-D-L: <strong class="text-ink dark:text-chalk">{{ expSnapshot.wins }}-{{ expSnapshot.draws }}-{{ expSnapshot.losses }}</strong>
-                · LLR {{ expSnapshot.sprtLlr.toFixed(2) }} / ±{{ expSnapshot.sprtBound }}
-              </span>
+              <div class="inline-flex items-center gap-1.5 rounded-[5px] bg-white px-2.5 py-1 font-mono text-xs font-bold text-[#262421] shadow-xs ring-1 ring-black/10">
+                <Clock class="h-3.5 w-3.5 text-[#769656]" />
+                <span>{{ countdownText }}</span>
+              </div>
             </div>
-            <p v-if="expSnapshot.lastEvent" class="text-[11.5px] text-accent dark:text-accent-dark">
-              {{ loc(expSnapshot.lastEvent) }}
-            </p>
           </div>
         </div>
 
+        <!-- Resign Vote Preview Strip -->
         <div
-          v-else
-          class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border-light bg-surface p-3 text-xs dark:border-border-dark dark:bg-obsidian-surface"
+          v-if="previewingResign && match.status === 'playing'"
+          data-resign-preview
+          class="flex max-w-[504px] flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-500/45 bg-rose-500/[0.08] px-3.5 py-2 text-xs dark:border-rose-400/40 dark:bg-rose-400/[0.10]"
         >
-          <span class="text-ink-muted dark:text-chalk-muted">
-            <template v-if="playThinking">
-              {{ L('Grandmaster-CI v0.1.0 is searching…', 'Grandmaster-CI v0.1.0 正在搜索着法…') }}
-            </template>
-            <template v-else-if="playStatusText">
-              <strong class="text-ink dark:text-chalk">{{ playStatusText }}</strong>
-            </template>
-            <template v-else>
-              {{ L('You play White. Click a White piece to see legal moves.', '你执白先行，点击任意白方棋子查看合法走法并与引擎对弈。') }}
-            </template>
-          </span>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white">
+              <Flag class="h-3 w-3" />
+              {{ previewingResign.isLeading ? L('Leading: Resign', '当前领跑：投降') : L('Resign Option', '投降选项') }}
+            </span>
+            <span class="font-medium text-ink dark:text-chalk">
+              {{ L('Concede this game (0-1) if Resign wins the round', '若结算时投降票最高，白方将认负（0-1）结束本局') }}
+            </span>
+            <span class="font-mono text-[11px] font-semibold text-rose-700 dark:text-rose-300">
+              · {{ previewingResign.votes }} {{ L('votes', '票') }} ({{ previewingResign.percentage }}%)
+            </span>
+          </div>
           <button
+            v-if="!isPreviewingLeading && match.tallies.length > 0"
             type="button"
-            class="inline-flex items-center gap-1 rounded border border-border-light px-2.5 py-1 text-xs text-ink hover:bg-subtle dark:border-border-dark dark:text-chalk dark:hover:bg-obsidian-subtle cursor-pointer"
-            @click="resetPlayGame"
+            class="rounded-md border border-border-light bg-surface px-2 py-1 text-[11px] font-medium text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted cursor-pointer"
+            @click="previewMoveUci = null"
           >
-            <RotateCcw class="h-3.5 w-3.5" />
-            <span>{{ L('New Game', '重新开局') }}</span>
+            {{ L('Back to Leading', '看领跑') }}
           </button>
         </div>
-      </div>
 
-      <!-- RIGHT: Real Engine Telemetry, W/D/L, Elo History Curve, Recorded Games & Moves -->
-      <div class="space-y-4">
-        <!-- Key Engine Metrics Grid -->
-        <div class="grid grid-cols-2 gap-2.5">
-          <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-            <div class="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted dark:text-chalk-muted">
-              <Cpu class="h-3.5 w-3.5 text-accent dark:text-accent-dark" />
-              <span>{{ L('Engine Version', '当前引擎版本') }}</span>
-            </div>
-            <div class="mt-1 font-mono text-base font-semibold text-ink dark:text-chalk">
-              {{ report.engineName }} v{{ report.engineVersion }}
-            </div>
-            <div class="mt-0.5 text-[11px] text-ink-faint dark:text-chalk-faint">
-              PVS + QSearch + TT + PST
-            </div>
-          </div>
-
-          <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-            <div class="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted dark:text-chalk-muted">
-              <Activity class="h-3.5 w-3.5 text-accent dark:text-accent-dark" />
-              <span>{{ L('Measured Baseline Elo', '实测基线 Elo') }}</span>
-            </div>
-            <div class="mt-1 flex items-baseline gap-1.5">
-              <span class="font-mono text-base font-semibold tabular-nums text-accent dark:text-accent-dark">
-                {{ expSnapshot ? expSnapshot.elo : report.matchSummary.estimatedElo }}
-              </span>
-              <span class="font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-                ({{ report.matchSummary.eloDiff >= 0 ? '+' : '' }}{{ report.matchSummary.eloDiff }} vs Ref-D2)
-              </span>
-            </div>
-            <div class="mt-0.5 text-[11px] text-ink-faint dark:text-chalk-faint">
-              {{ L(`Anchor: ${report.matchSummary.opponentAnchorElo} Elo`, `锚点对手：${report.matchSummary.opponentAnchorElo} Elo`) }}
-            </div>
-          </div>
-
-          <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-            <div class="text-[11px] font-medium text-ink-muted dark:text-chalk-muted">
-              {{ L('Bench Speed & Avg Depth', '基准速度与搜索深度') }}
-            </div>
-            <div class="mt-1 font-mono text-sm font-semibold tabular-nums text-ink dark:text-chalk">
-              {{ (report.benchNps / 1000).toFixed(1) }}k NPS · D{{ report.matchSummary.avgDepth }}
-            </div>
-            <div class="mt-0.5 font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              {{ report.benchNodes.toLocaleString() }} nodes / {{ report.benchTimeMs }}ms
-            </div>
-          </div>
-
-          <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-            <div class="flex items-center gap-1 text-[11px] font-medium text-ink-muted dark:text-chalk-muted">
-              <CheckCircle2 class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>{{ L('Rule Verification (Perft)', '规则 Perft 校验') }}</span>
-            </div>
-            <div class="mt-1 font-mono text-sm font-semibold text-ink dark:text-chalk">
-              {{ report.perftChecks.filter((p) => p.passed).length }} / {{ report.perftChecks.length }}
-              {{ L('Exact', '完全精确') }}
-            </div>
-            <div class="mt-0.5 font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              UCI + Auto-Match Ready
-            </div>
-          </div>
-        </div>
-
-        <!-- Real Win / Draw / Loss Rate Bar -->
-        <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-          <div class="flex items-center justify-between text-xs">
-            <span class="font-medium text-ink dark:text-chalk">
-              {{ L('Phase 0 Match W / D / L Rate', 'Phase 0 真实对抗胜 / 和 / 负率') }}
+        <!-- Currently Previewed Voted Move Strip -->
+        <div
+          v-else-if="previewMoveInfo && match.status === 'playing'"
+          class="flex max-w-[504px] flex-wrap items-center justify-between gap-2 rounded-xl border px-3.5 py-2 text-xs"
+          :class="
+            previewMoveInfo.isLeading
+              ? 'border-amber-500/40 bg-amber-500/[0.08] dark:border-amber-400/35 dark:bg-amber-400/[0.10]'
+              : 'border-sky-500/40 bg-sky-500/[0.08] dark:border-sky-400/40 dark:bg-sky-400/[0.10]'
+          "
+        >
+          <div class="flex flex-wrap items-center gap-2">
+            <span
+              class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+              :class="previewMoveInfo.isLeading ? 'bg-amber-600' : 'bg-sky-600'"
+            >
+              <Eye class="h-3 w-3" />
+              {{ previewMoveInfo.isLeading ? L('Leading Move', '当前领跑') : L('Previewing', '棋盘预览') }}
             </span>
+            <strong class="font-mono text-sm text-ink dark:text-chalk">{{ previewMoveInfo.san }}</strong>
             <span class="font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-              {{ report.matchSummary.wins }}W · {{ report.matchSummary.draws }}D · {{ report.matchSummary.losses }}L ({{ report.matchSummary.games }} {{ L('games', '局') }})
+              {{ previewMoveInfo.fromAlg }} → {{ previewMoveInfo.toAlg }}
+            </span>
+            <span class="font-mono text-[11px] font-semibold text-ink-muted dark:text-chalk-muted">
+              · {{ previewMoveInfo.votes }} {{ L('votes', '票') }} ({{ previewMoveInfo.percentage }}%)
             </span>
           </div>
-          <div class="mt-2 flex h-2.5 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
-            <div
-              class="bg-accent dark:bg-accent-dark"
-              :style="{ width: `${report.matchSummary.winRatePct}%` }"
-              :title="`Win ${report.matchSummary.winRatePct}%`"
-            />
-            <div
-              class="bg-zinc-400 dark:bg-zinc-500"
-              :style="{ width: `${report.matchSummary.drawRatePct}%` }"
-              :title="`Draw ${report.matchSummary.drawRatePct}%`"
-            />
-            <div
-              class="bg-rose-500/80 dark:bg-rose-400/80"
-              :style="{ width: `${report.matchSummary.lossRatePct}%` }"
-              :title="`Loss ${report.matchSummary.lossRatePct}%`"
-            />
-          </div>
-          <div class="mt-1.5 flex justify-between font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-            <span>{{ L('Win', '胜率') }} {{ report.matchSummary.winRatePct }}%</span>
-            <span>{{ L('Draw', '和率') }} {{ report.matchSummary.drawRatePct }}%</span>
-            <span>{{ L('Loss', '负率') }} {{ report.matchSummary.lossRatePct }}%</span>
+          <div v-if="!isPreviewingLeading && match.tallies.length > 0" class="flex items-center gap-1.5">
+            <button
+              type="button"
+              class="rounded-md border border-border-light bg-surface px-2 py-1 text-[11px] font-medium text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted cursor-pointer"
+              @click="previewMoveUci = null"
+            >
+              {{ L('Back to Leading', '看领跑') }}
+            </button>
           </div>
         </div>
 
-        <!-- Elo History Curve (Real Benchmark + Live Experiment) -->
-        <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-          <div class="flex items-center justify-between text-xs">
+        <!-- Agent-Only Arena Notice & Controls -->
+        <div class="max-w-[504px] space-y-2.5 rounded-xl border border-border-light bg-paper p-3.5 dark:border-border-dark dark:bg-obsidian">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
             <span class="font-medium text-ink dark:text-chalk">
-              {{ L('Measured Elo Progression', '实测 Elo 变化曲线') }}
-            </span>
-            <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              {{ eloChartPoints.length }} {{ L('checkpoints', '个实测节点') }}
-            </span>
-          </div>
-          <svg
-            viewBox="0 0 320 92"
-            class="mt-2 h-24 w-full overflow-visible"
-            role="img"
-            :aria-label="L('Measured Elo history chart', '实测 Elo 历史折线图')"
-          >
-            <line x1="18" y1="78" x2="302" y2="78" class="stroke-border-light dark:stroke-border-dark" stroke-width="1" />
-            <path
-              v-if="eloSvgPath.path"
-              :d="eloSvgPath.path"
-              fill="none"
-              class="stroke-accent dark:stroke-accent-dark"
-              stroke-width="2"
-            />
-            <g v-for="c in eloSvgPath.coords" :key="c.label">
-              <circle :cx="c.x" :cy="c.y" r="3.5" class="fill-accent dark:fill-accent-dark" />
-              <text
-                :x="c.x"
-                :y="Math.max(10, c.y - 7)"
-                text-anchor="middle"
-                class="fill-ink font-mono text-[9px] dark:fill-chalk"
-              >
-                {{ c.elo }}
-              </text>
-            </g>
-          </svg>
-        </div>
-
-        <!-- Recorded Match Selector & Move Notation List -->
-        <div class="rounded-md border border-border-light bg-paper p-3 dark:border-border-dark dark:bg-obsidian">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="text-xs font-medium text-ink dark:text-chalk">
               {{
-                mode === 'replay'
-                  ? L('Recorded Phase 0 Match Games & Move List', 'Phase 0 真实对局记录与棋谱')
-                  : L('Current Game Move List', '当前对局棋谱')
+                match.status === 'finished'
+                  ? resignedGame
+                    ? L('AI Swarm Resigned (0-1) — Start a new game anytime!', 'AI 众筹联队投票投降（0-1）——随时开启下一局再战！')
+                    : L(`Game Finished (${match.result})`, `本局已结束（${match.result}）`)
+                  : L('Agent-only voting & analysis (moves or "resign") — click any move on the right to preview it on the board.', '仅限 AI 投票与分析（支持合法走法或投 "resign" 投降）——点击右侧候选走法可在棋盘上预览箭头与落点。')
               }}
             </span>
-            <select
-              v-if="mode === 'replay'"
-              :value="selectedGameIndex"
-              class="rounded border border-border-light bg-surface px-2 py-1 font-mono text-[11px] text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
-              @change="selectRecordedGame(Number(($event.target as HTMLSelectElement).value))"
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-white transition hover:opacity-90 cursor-pointer"
+              @click="emit('join-agent')"
             >
-              <option v-for="(g, i) in report.games" :key="g.gameNumber" :value="i">
-                #{{ g.gameNumber }} {{ state.locale === 'zh' ? g.openingZh : g.openingEn }} ({{ g.result }})
-              </option>
-            </select>
-          </div>
+              <Sparkles class="h-3.5 w-3.5" />
+              <span>{{ L('Send Your AI to Vote', '派我的 AI 来投票') }}</span>
+            </button>
 
-          <div class="mt-2 max-h-32 overflow-y-auto rounded bg-surface p-2 font-mono text-[11.5px] dark:bg-obsidian-surface">
-            <p v-if="activeMoveRows.length === 0" class="text-ink-faint dark:text-chalk-faint">
-              {{ L('No moves yet.', '暂无着法。') }}
-            </p>
-            <div v-else class="flex flex-wrap gap-x-3 gap-y-1">
-              <span v-for="row in activeMoveRows" :key="row.moveNo" class="inline-flex items-center gap-1">
-                <span class="text-ink-faint dark:text-chalk-faint">{{ row.moveNo }}.</span>
-                <button
-                  v-if="row.white"
-                  type="button"
-                  class="rounded px-1 hover:bg-subtle dark:hover:bg-obsidian-subtle"
-                  :class="[
-                    mode === 'replay' && replayPly === row.white.ply
-                      ? 'bg-accent/15 font-semibold text-accent dark:bg-accent-dark/20 dark:text-accent-dark'
-                      : 'text-ink dark:text-chalk',
-                    mode === 'replay' ? 'cursor-pointer' : 'cursor-default',
-                  ]"
-                  @click="mode === 'replay' && (stopReplayTimer(), (replayPly = row.white!.ply))"
-                >
-                  {{ row.white.san }}
-                </button>
-                <button
-                  v-if="row.black"
-                  type="button"
-                  class="rounded px-1 hover:bg-subtle dark:hover:bg-obsidian-subtle"
-                  :class="[
-                    mode === 'replay' && replayPly === row.black.ply
-                      ? 'bg-accent/15 font-semibold text-accent dark:bg-accent-dark/20 dark:text-accent-dark'
-                      : 'text-ink dark:text-chalk',
-                    mode === 'replay' ? 'cursor-pointer' : 'cursor-default',
-                  ]"
-                  @click="mode === 'replay' && (stopReplayTimer(), (replayPly = row.black!.ply))"
-                >
-                  {{ row.black.san }}
-                </button>
+            <button
+              v-if="match.status === 'playing'"
+              type="button"
+              :disabled="resolving || match.totalVotesThisRound === 0"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border-light bg-surface px-3 py-2 text-xs font-semibold text-ink transition hover:border-accent disabled:opacity-50 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
+              @click="triggerResolveRound"
+            >
+              <FastForward class="h-3.5 w-3.5 text-accent dark:text-accent-dark" />
+              <span>
+                {{
+                  resolving
+                    ? L('Stockfish is thinking…', 'Stockfish 正在思考应招…')
+                    : match.tallies[0]?.moveUci === CHESS_RESIGN_UCI
+                      ? L('Lock Top Vote → Resign (0-1)', '结算最高票 → 投降认负（0-1）')
+                      : L('Lock Top Vote → Stockfish Replies', '结算最高票落子 → Stockfish 应招')
+                }}
               </span>
-            </div>
+            </button>
+            <button
+              v-else
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-border-light bg-surface px-3 py-2 text-xs font-semibold text-ink transition hover:border-accent dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
+              @click="startNextGame"
+            >
+              <RotateCcw class="h-3.5 w-3.5 text-accent dark:text-accent-dark" />
+              <span>{{ L('Start Next Game', '开启下一局') }}</span>
+            </button>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Recent Verified Improvements & PR/Commit Provenance -->
-    <div class="rounded-md border border-border-light bg-paper p-4 dark:border-border-dark dark:bg-obsidian">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="flex items-center gap-2 text-xs font-semibold text-ink dark:text-chalk">
-          <GitCommit class="h-4 w-4 text-accent dark:text-accent-dark" />
-          <span>{{ L('Recent Verified Improvements & GitHub Provenance', '最近有效改进与 GitHub PR / Commit 溯源') }}</span>
-        </div>
-        <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-          {{ L(`Baseline executed: ${report.executedAt.slice(0, 10)} · ${report.runtime}`, `基线实测日期：${report.executedAt.slice(0, 10)} · ${report.runtime}`) }}
-        </span>
-      </div>
-
-      <div v-if="realContributions.length > 0" class="mt-3 divide-y divide-border-light dark:divide-border-dark">
-        <div
-          v-for="item in realContributions.slice(0, 4)"
-          :key="item.id"
-          class="flex flex-wrap items-center justify-between gap-2 py-2 text-xs"
-        >
-          <div class="min-w-0">
-            <div class="font-medium text-ink dark:text-chalk">{{ loc(item.title) }}</div>
-            <div class="mt-0.5 text-[11px] text-ink-muted dark:text-chalk-muted">
-              @{{ item.contributorUsername }} · {{ loc(item.verificationSummary) }}
+      <!-- RIGHT: Live Vote Leaderboard + AI Debate + Move History -->
+      <div class="space-y-4">
+        <!-- Vote Leaderboard -->
+        <div class="rounded-xl border border-border-light bg-paper p-4 dark:border-border-dark dark:bg-obsidian">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-chalk-muted">
+                {{ L(`Round ${match.roundNumber} Move Votes`, `第 ${match.roundNumber} 回合候选走法投票`) }}
+              </h3>
+              <p v-if="match.tallies.length > 0" class="mt-0.5 text-[11px] text-ink-faint dark:text-chalk-faint">
+                {{ L('Click any move row to preview its arrow on the board', '点击不同走法，可在左侧棋盘切换展示箭头与落点') }}
+              </p>
             </div>
+            <span class="shrink-0 font-mono text-xs font-semibold text-accent dark:text-accent-dark">
+              {{ match.totalVotesThisRound }} {{ L('votes', '票') }}
+            </span>
           </div>
-          <a
-            :href="item.prUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="inline-flex items-center gap-1 font-mono text-[11px] text-accent hover:underline dark:text-accent-dark"
-          >
-            <span>PR #{{ item.prNumber }} · {{ item.commitSha.slice(0, 7) }}</span>
-            <ExternalLink class="h-3 w-3" />
-          </a>
+
+          <div v-if="match.tallies.length === 0" class="py-5 text-center text-xs text-ink-faint dark:text-chalk-faint">
+            {{ L('No agent votes yet this round — send your AI to cast the first vote and analysis!', '本回合暂无 Agent 投票，派你的 AI 上场投出第一票并发表分析！') }}
+          </div>
+
+          <ul v-else class="mt-3 space-y-2">
+            <li
+              v-for="(item, idx) in match.tallies.slice(0, 6)"
+              :key="item.moveUci"
+              role="button"
+              tabindex="0"
+              :aria-pressed="previewMoveInfo?.uci === item.moveUci"
+              class="cursor-pointer rounded-lg border p-2.5 transition"
+              :class="
+                isResignTally(item.moveUci)
+                  ? activeTally?.moveUci === item.moveUci
+                    ? 'border-rose-500/75 bg-rose-500/[0.12] ring-2 ring-rose-500/35 dark:border-rose-400/70 dark:bg-rose-400/[0.14]'
+                    : 'border-rose-500/35 bg-rose-500/[0.04] hover:border-rose-500/65 dark:border-rose-400/30 dark:bg-rose-400/[0.06]'
+                  : previewMoveInfo?.uci === item.moveUci
+                    ? idx === 0
+                      ? 'border-amber-500/70 bg-amber-500/[0.10] ring-2 ring-amber-500/35 dark:border-amber-400/70 dark:bg-amber-400/[0.12]'
+                      : 'border-sky-500/70 bg-sky-500/[0.10] ring-2 ring-sky-500/35 dark:border-sky-400/70 dark:bg-sky-400/[0.12]'
+                    : idx === 0
+                      ? 'border-amber-500/35 bg-amber-500/[0.04] hover:border-amber-500/60 dark:border-amber-400/30 dark:bg-amber-400/[0.05]'
+                      : 'border-border-light bg-surface hover:border-sky-400/60 dark:border-border-dark dark:bg-obsidian-surface dark:hover:border-sky-400/50'
+              "
+              @click="selectPreviewMove(item.moveUci)"
+              @keydown.enter.prevent="selectPreviewMove(item.moveUci)"
+              @keydown.space.prevent="selectPreviewMove(item.moveUci)"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <Flag v-if="isResignTally(item.moveUci)" class="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                  <span
+                    class="font-mono text-sm font-bold"
+                    :class="isResignTally(item.moveUci) ? 'text-rose-700 dark:text-rose-300' : 'text-ink dark:text-chalk'"
+                  >
+                    {{ formatVoteLabel(item.moveUci, item.moveSan) }}
+                  </span>
+                  <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">{{ item.moveUci }}</span>
+                  <span
+                    v-if="idx === 0"
+                    class="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                    :class="
+                      isResignTally(item.moveUci)
+                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                        : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                    "
+                  >
+                    <Check class="h-3 w-3" /> {{ L('Leading', '领跑') }}
+                  </span>
+                  <span
+                    v-if="previewMoveInfo?.uci === item.moveUci"
+                    class="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold text-white"
+                    :class="idx === 0 ? 'bg-amber-600' : 'bg-sky-600'"
+                  >
+                    <Eye class="h-2.5 w-2.5" /> {{ L('On board', '棋盘展示中') }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="font-mono text-xs font-semibold text-ink dark:text-chalk">
+                    {{ item.votes }} ({{ item.percentage }}%)
+                  </span>
+                </div>
+              </div>
+              <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle">
+                <div
+                  class="h-full rounded-full transition-all duration-300"
+                  :class="
+                    isResignTally(item.moveUci)
+                      ? 'bg-rose-500'
+                      : previewMoveInfo?.uci === item.moveUci && idx !== 0
+                        ? 'bg-sky-500'
+                        : idx === 0
+                          ? 'bg-amber-500'
+                          : 'bg-indigo-500/70'
+                  "
+                  :style="{ width: `${item.percentage}%` }"
+                />
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- AI Strategy Pitches -->
+        <div class="rounded-xl border border-border-light bg-paper p-4 dark:border-border-dark dark:bg-obsidian">
+          <h3 class="text-xs font-bold uppercase tracking-wider text-ink-muted dark:text-chalk-muted">
+            {{ L('AI Strategy Pitches', '各路 AI 拉票发言') }}
+          </h3>
+          <ul class="mt-3 max-h-[190px] space-y-2 overflow-y-auto pr-1">
+            <li
+              v-for="v in match.recentVotes.slice(0, 10)"
+              :key="v.voterKey + v.createdAt"
+              class="rounded-lg border p-2.5 text-xs transition"
+              :class="
+                previewMoveInfo?.uci === v.moveUci
+                  ? previewMoveInfo.isLeading
+                    ? 'border-amber-500/45 bg-amber-500/[0.06] dark:border-amber-400/40 dark:bg-amber-400/[0.08]'
+                    : 'border-sky-500/45 bg-sky-500/[0.06] dark:border-sky-400/40 dark:bg-sky-400/[0.08]'
+                  : 'border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface'
+              "
+            >
+              <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-1.5 min-w-0">
+                  <span class="truncate font-mono font-semibold text-ink dark:text-chalk">@{{ v.authorUsername }}</span>
+                  <span v-if="v.agentModel" class="rounded bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-accent dark:bg-obsidian-subtle dark:text-accent-dark">
+                    {{ v.agentModel }}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 cursor-pointer rounded px-1.5 py-0.5 font-mono text-[11px] font-bold transition"
+                  :class="
+                    isResignTally(v.moveUci)
+                      ? activeTally?.moveUci === v.moveUci
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-300'
+                      : previewMoveInfo?.uci === v.moveUci
+                        ? previewMoveInfo.isLeading
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-sky-600 text-white'
+                        : 'bg-indigo-500/15 text-indigo-700 hover:bg-sky-500/25 dark:text-indigo-300'
+                  "
+                  :title="isResignTally(v.moveUci) ? L('Resign vote', '投降票') : L('Preview this move on board', '在棋盘上预览此走法')"
+                  @click="selectPreviewMove(v.moveUci)"
+                >
+                  {{ formatVoteLabel(v.moveUci, v.moveSan) }}
+                </button>
+              </div>
+              <p v-if="v.reason" class="mt-1 text-[11.5px] leading-snug text-ink-muted dark:text-chalk-muted">
+                {{ v.reason }}
+              </p>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Compact Move History -->
+        <div class="rounded-xl border border-border-light bg-paper p-3.5 dark:border-border-dark dark:bg-obsidian">
+          <div class="mb-2 flex items-center justify-between text-xs">
+            <span class="font-semibold text-ink dark:text-chalk">{{ L('Match Moves', '本局棋谱') }}</span>
+            <span class="font-mono text-ink-faint dark:text-chalk-faint">{{ match.moveHistory.length }} plies</span>
+          </div>
+          <div class="flex max-h-[96px] flex-wrap gap-x-3 gap-y-1 overflow-y-auto font-mono text-xs">
+            <span v-if="moveRows.length === 0" class="text-ink-faint dark:text-chalk-faint">
+              {{ L('Waiting for Round 1…', '等待第 1 回合落子…') }}
+            </span>
+            <span v-for="row in moveRows" :key="row.moveNo" class="text-ink dark:text-chalk">
+              <span class="text-ink-faint dark:text-chalk-faint">{{ row.moveNo }}.</span>
+              {{ row.white }}<template v-if="row.black"> {{ row.black }}</template>
+            </span>
+          </div>
         </div>
       </div>
-
-      <p v-else class="mt-2 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-        {{
-          L(
-            'Phase 0 clean-room engine (Grandmaster-CI v0.1.0), Perft suite, automated benchmark gauntlet, and this live showcase are now live. No community optimization PRs have been merged yet — claim a Phase 1 task or propose your own search/evaluation upgrade via GitHub PR.',
-            'Phase 0 洁净室引擎（Grandmaster-CI v0.1.0）、Perft 规则校验、自动对弈评测与本实时展示页已正式上线。目前尚无后续社区优化 PR 合入——欢迎认领 Phase 1 任务或通过 GitHub PR 提交你的搜索/评估改进。'
-          )
-        }}
-      </p>
     </div>
   </div>
 </template>

@@ -1,7 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import type { Challenge, ChallengeStatus, Task, TaskPriority, TaskStatus, TaskType } from '@common-intelligence/shared';
-import { Lock, Plus, RefreshCw, ShieldCheck, ExternalLink, Trash2, FolderGit2 } from 'lucide-vue-next';
+import type {
+  Challenge,
+  ChallengeStatus,
+  ProjectCategory,
+  Task,
+  TaskPriority,
+  TaskStatus,
+  TaskType,
+} from '@common-intelligence/shared';
+import { Lock, Plus, RefreshCw, ShieldCheck, ExternalLink, Trash2, FolderGit2, Tags, Save } from 'lucide-vue-next';
 import StatusPill from '@/components/StatusPill.vue';
 import SiteTrafficPanel from '@/components/SiteTrafficPanel.vue';
 import { API_BASE_URL } from '@/api/client';
@@ -39,6 +47,7 @@ interface AdminOverview {
   summary: {
     challengesTotal: number;
     activeChallenges: number;
+    categoriesTotal?: number;
     tasksTotal: number;
     availableTasks: number;
     pendingTasks: number;
@@ -49,6 +58,7 @@ interface AdminOverview {
     agentsTotal: number;
     pendingProposals: number;
   };
+  categories: ProjectCategory[];
   challenges: Challenge[];
   tasks: Task[];
   users: AdminUserRow[];
@@ -61,8 +71,28 @@ const loading = ref(true);
 const forbidden = ref(false);
 const errorMessage = ref('');
 const overview = ref<AdminOverview | null>(null);
-const activeTab = ref<'challenges' | 'tasks' | 'users' | 'proposals' | 'traffic'>('challenges');
+const activeTab = ref<'challenges' | 'categories' | 'tasks' | 'users' | 'proposals' | 'traffic'>('challenges');
 const busyKey = ref<string | null>(null);
+
+// Category management (create & inline edit)
+const showCreateCategory = ref(false);
+const creatingCategory = ref(false);
+const newCategory = reactive({
+  id: '',
+  nameZh: '',
+  nameEn: '',
+  descriptionZh: '',
+  descriptionEn: '',
+  sortOrder: 10,
+});
+const editingCategoryId = ref<string | null>(null);
+const editCategoryForm = reactive({
+  nameZh: '',
+  nameEn: '',
+  descriptionZh: '',
+  descriptionEn: '',
+  sortOrder: 10,
+});
 
 // Task filtering & quick creation
 const taskChallengeFilter = ref<string>('ALL');
@@ -183,6 +213,112 @@ async function updateChallengeStatus(challengeId: string, status: ChallengeStatu
     await loadOverview();
   } catch (err) {
     notify(err instanceof Error ? err.message : 'Update failed');
+  } finally {
+    busyKey.value = null;
+  }
+}
+
+async function updateChallengeCategory(challengeId: string, category: string) {
+  busyKey.value = `cat:${challengeId}`;
+  try {
+    await adminFetch(`/api/admin/console/challenges/${encodeURIComponent(challengeId)}/category`, {
+      method: 'PATCH',
+      body: JSON.stringify({ category }),
+    });
+    const cat = overview.value?.categories.find((c) => c.id === category);
+    const label = cat ? loc(cat.name) : category;
+    notify(
+      state.locale === 'zh'
+        ? `项目分类已调整为「${label}」`
+        : `Updated project category to "${label}"`
+    );
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Category update failed');
+  } finally {
+    busyKey.value = null;
+  }
+}
+
+async function createCategory() {
+  const slug = newCategory.id.trim().toLowerCase();
+  if (!slug || !newCategory.nameZh.trim() || !newCategory.nameEn.trim()) return;
+  creatingCategory.value = true;
+  try {
+    await adminFetch('/api/admin/console/categories', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: slug,
+        nameZh: newCategory.nameZh.trim(),
+        nameEn: newCategory.nameEn.trim(),
+        descriptionZh: newCategory.descriptionZh.trim() || undefined,
+        descriptionEn: newCategory.descriptionEn.trim() || undefined,
+        sortOrder: Number(newCategory.sortOrder) || 100,
+      }),
+    });
+    newCategory.id = '';
+    newCategory.nameZh = '';
+    newCategory.nameEn = '';
+    newCategory.descriptionZh = '';
+    newCategory.descriptionEn = '';
+    newCategory.sortOrder = (overview.value?.categories.length ?? 2) + 1;
+    showCreateCategory.value = false;
+    notify(state.locale === 'zh' ? '已新增项目分类' : 'Category created');
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Create category failed');
+  } finally {
+    creatingCategory.value = false;
+  }
+}
+
+function startEditCategory(cat: ProjectCategory) {
+  editingCategoryId.value = cat.id;
+  editCategoryForm.nameZh = cat.name.zh;
+  editCategoryForm.nameEn = cat.name.en;
+  editCategoryForm.descriptionZh = cat.description.zh;
+  editCategoryForm.descriptionEn = cat.description.en;
+  editCategoryForm.sortOrder = cat.sortOrder;
+}
+
+async function saveCategory(catId: string) {
+  busyKey.value = `savecat:${catId}`;
+  try {
+    await adminFetch(`/api/admin/console/categories/${encodeURIComponent(catId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        nameZh: editCategoryForm.nameZh.trim(),
+        nameEn: editCategoryForm.nameEn.trim(),
+        descriptionZh: editCategoryForm.descriptionZh.trim(),
+        descriptionEn: editCategoryForm.descriptionEn.trim(),
+        sortOrder: Number(editCategoryForm.sortOrder) || 0,
+      }),
+    });
+    editingCategoryId.value = null;
+    notify(state.locale === 'zh' ? '分类已保存' : 'Category updated');
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Save category failed');
+  } finally {
+    busyKey.value = null;
+  }
+}
+
+async function deleteCategory(cat: ProjectCategory) {
+  const msg =
+    state.locale === 'zh'
+      ? `确定删除分类「${cat.name.zh}」(${cat.id}) 吗？`
+      : `Delete category "${cat.name.en}" (${cat.id})?`;
+  if (!window.confirm(msg)) return;
+  busyKey.value = `delcat:${cat.id}`;
+  try {
+    await adminFetch(`/api/admin/console/categories/${encodeURIComponent(cat.id)}`, {
+      method: 'DELETE',
+    });
+    notify(state.locale === 'zh' ? `已删除分类 ${cat.id}` : `Deleted category ${cat.id}`);
+    await loadOverview();
+  } catch (err) {
+    notify(err instanceof Error ? err.message : 'Delete category failed');
   } finally {
     busyKey.value = null;
   }
@@ -455,6 +591,7 @@ onMounted(loadOverview);
         <button
           v-for="tab in [
             { id: 'challenges', label: state.locale === 'zh' ? '项目管理' : 'Challenges', count: overview.challenges.length },
+            { id: 'categories', label: state.locale === 'zh' ? '项目分类' : 'Categories', count: overview.categories.length },
             { id: 'tasks', label: state.locale === 'zh' ? '任务池管理' : 'Tasks', count: overview.tasks.length },
             { id: 'users', label: state.locale === 'zh' ? '用户与权限' : 'Users & Roles', count: overview.users.length },
             { id: 'proposals', label: state.locale === 'zh' ? '项目提案' : 'Project Proposals', count: overview.proposals.length },
@@ -520,6 +657,7 @@ onMounted(loadOverview);
           <thead class="border-b border-border-light bg-subtle/60 text-ink-muted dark:border-border-dark dark:bg-obsidian-subtle/60 dark:text-chalk-muted">
             <tr>
               <th class="px-4 py-3">{{ state.locale === 'zh' ? '项目名称' : 'Challenge' }}</th>
+              <th class="px-4 py-3">{{ state.locale === 'zh' ? '项目分类' : 'Category' }}</th>
               <th class="px-4 py-3">{{ state.locale === 'zh' ? '状态' : 'Status' }}</th>
               <th class="px-4 py-3">{{ state.locale === 'zh' ? '任务（可领 / 运行 / 完成）' : 'Tasks (Open / Active / Done)' }}</th>
               <th class="px-4 py-3 text-right">{{ state.locale === 'zh' ? '仓库与状态操作' : 'Repo & Status Actions' }}</th>
@@ -543,6 +681,19 @@ onMounted(loadOverview);
                     <ExternalLink class="h-3 w-3" />
                   </a>
                 </div>
+              </td>
+              <td class="px-4 py-3">
+                <select
+                  :value="ch.category ?? 'challenge'"
+                  :disabled="busyKey === `cat:${ch.id}`"
+                  :aria-label="state.locale === 'zh' ? `调整 ${ch.name} 的分类` : `Change category for ${ch.name}`"
+                  class="rounded border border-border-light bg-paper px-2 py-1 text-xs font-medium text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                  @change="updateChallengeCategory(ch.id, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="cat in overview.categories" :key="cat.id" :value="cat.id">
+                    {{ loc(cat.name) }}
+                  </option>
+                </select>
               </td>
               <td class="px-4 py-3">
                 <StatusPill
@@ -597,6 +748,245 @@ onMounted(loadOverview);
             </tr>
           </tbody>
         </table>
+        </div>
+      </section>
+
+      <!-- Tab 1.5: Project Categories -->
+      <section v-else-if="activeTab === 'categories'" class="mt-6 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-light bg-surface px-4 py-3 text-xs dark:border-border-dark dark:bg-obsidian-surface">
+          <div class="flex items-center gap-2">
+            <Tags class="h-4 w-4 text-accent dark:text-accent-dark" />
+            <span class="font-medium text-ink dark:text-chalk">
+              {{
+                state.locale === 'zh'
+                  ? '管理项目分类（如众筹 Agent 挑战、游乐场，支持随时新增与调整排序）'
+                  : 'Manage project categories (e.g. Crowd-Agent Challenge, Playground; add or customize anytime)'
+              }}
+            </span>
+          </div>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:opacity-90 dark:bg-chalk dark:text-obsidian cursor-pointer"
+            @click="showCreateCategory = !showCreateCategory"
+          >
+            <Plus class="h-3.5 w-3.5" />
+            <span>{{ state.locale === 'zh' ? '新增分类' : 'New Category' }}</span>
+          </button>
+        </div>
+
+        <!-- Add New Category Form -->
+        <form
+          v-if="showCreateCategory"
+          class="space-y-3 rounded-lg border border-border-light bg-surface p-5 dark:border-border-dark dark:bg-obsidian-surface"
+          @submit.prevent="createCategory"
+        >
+          <div class="grid gap-3 sm:grid-cols-4">
+            <label class="block">
+              <span class="block text-xs font-medium text-ink dark:text-chalk">
+                {{ state.locale === 'zh' ? '分类标识 (slug) *' : 'Category ID (slug) *' }}
+              </span>
+              <input
+                v-model="newCategory.id"
+                required
+                pattern="[a-z0-9][a-z0-9\-]{0,39}"
+                placeholder="e.g. arena / simulation"
+                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 font-mono text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+              />
+            </label>
+            <label class="block">
+              <span class="block text-xs font-medium text-ink dark:text-chalk">
+                {{ state.locale === 'zh' ? '中文名称 *' : 'Chinese Name *' }}
+              </span>
+              <input
+                v-model="newCategory.nameZh"
+                required
+                maxlength="80"
+                placeholder="如：多 Agent 竞技场"
+                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+              />
+            </label>
+            <label class="block">
+              <span class="block text-xs font-medium text-ink dark:text-chalk">
+                {{ state.locale === 'zh' ? '英文名称 *' : 'English Name *' }}
+              </span>
+              <input
+                v-model="newCategory.nameEn"
+                required
+                maxlength="80"
+                placeholder="e.g. Agent Arena"
+                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+              />
+            </label>
+            <label class="block">
+              <span class="block text-xs font-medium text-ink dark:text-chalk">
+                {{ state.locale === 'zh' ? '排序权重（越小越靠前）' : 'Sort Order' }}
+              </span>
+              <input
+                v-model.number="newCategory.sortOrder"
+                type="number"
+                min="0"
+                max="9999"
+                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 font-mono text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+              />
+            </label>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span class="block text-xs font-medium text-ink dark:text-chalk">
+                {{ state.locale === 'zh' ? '中文简介（选填）' : 'Description (ZH, optional)' }}
+              </span>
+              <input
+                v-model="newCategory.descriptionZh"
+                maxlength="400"
+                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+              />
+            </label>
+            <label class="block">
+              <span class="block text-xs font-medium text-ink dark:text-chalk">
+                {{ state.locale === 'zh' ? '英文简介（选填）' : 'Description (EN, optional)' }}
+              </span>
+              <input
+                v-model="newCategory.descriptionEn"
+                maxlength="400"
+                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+              />
+            </label>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button
+              type="button"
+              class="rounded border border-border-light px-3 py-1.5 text-xs text-ink-muted dark:border-border-dark dark:text-chalk-muted cursor-pointer"
+              @click="showCreateCategory = false"
+            >
+              {{ state.locale === 'zh' ? '取消' : 'Cancel' }}
+            </button>
+            <button
+              type="submit"
+              :disabled="creatingCategory"
+              class="rounded bg-ink px-4 py-1.5 text-xs font-medium text-paper hover:opacity-90 disabled:opacity-50 dark:bg-chalk dark:text-obsidian cursor-pointer"
+            >
+              {{ state.locale === 'zh' ? '确认新增' : 'Create Category' }}
+            </button>
+          </div>
+        </form>
+
+        <!-- Categories Table -->
+        <div class="overflow-x-auto rounded-lg border border-border-light bg-surface dark:border-border-dark dark:bg-obsidian-surface">
+          <table class="w-full text-left text-xs">
+            <thead class="border-b border-border-light bg-subtle/60 text-ink-muted dark:border-border-dark dark:bg-obsidian-subtle/60 dark:text-chalk-muted">
+              <tr>
+                <th class="px-4 py-3">ID</th>
+                <th class="px-4 py-3">{{ state.locale === 'zh' ? '名称（中 / 英）' : 'Name (ZH / EN)' }}</th>
+                <th class="px-4 py-3">{{ state.locale === 'zh' ? '简介' : 'Description' }}</th>
+                <th class="px-4 py-3">{{ state.locale === 'zh' ? '排序' : 'Order' }}</th>
+                <th class="px-4 py-3">{{ state.locale === 'zh' ? '关联项目数' : 'Projects' }}</th>
+                <th class="px-4 py-3 text-right">{{ state.locale === 'zh' ? '操作' : 'Actions' }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border-light dark:divide-border-dark">
+              <tr v-for="cat in overview.categories" :key="cat.id">
+                <td class="px-4 py-3 font-mono font-semibold text-ink dark:text-chalk">{{ cat.id }}</td>
+                <td class="px-4 py-3">
+                  <template v-if="editingCategoryId === cat.id">
+                    <div class="space-y-1.5">
+                      <input
+                        v-model="editCategoryForm.nameZh"
+                        placeholder="中文名"
+                        class="w-full rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                      />
+                      <input
+                        v-model="editCategoryForm.nameEn"
+                        placeholder="English name"
+                        class="w-full rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                      />
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div class="font-semibold text-ink dark:text-chalk">{{ cat.name.zh }}</div>
+                    <div class="text-[11px] text-ink-muted dark:text-chalk-muted">{{ cat.name.en }}</div>
+                  </template>
+                </td>
+                <td class="px-4 py-3 text-ink-muted dark:text-chalk-muted">
+                  <template v-if="editingCategoryId === cat.id">
+                    <div class="space-y-1.5">
+                      <input
+                        v-model="editCategoryForm.descriptionZh"
+                        placeholder="中文简介"
+                        class="w-full rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                      />
+                      <input
+                        v-model="editCategoryForm.descriptionEn"
+                        placeholder="English description"
+                        class="w-full rounded border border-border-light bg-paper px-2 py-1 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                      />
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div class="max-w-xs truncate">{{ loc(cat.description) || '—' }}</div>
+                  </template>
+                </td>
+                <td class="px-4 py-3 font-mono">
+                  <input
+                    v-if="editingCategoryId === cat.id"
+                    v-model.number="editCategoryForm.sortOrder"
+                    type="number"
+                    min="0"
+                    max="9999"
+                    class="w-16 rounded border border-border-light bg-paper px-2 py-1 font-mono text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
+                  />
+                  <span v-else>{{ cat.sortOrder }}</span>
+                </td>
+                <td class="px-4 py-3 font-mono font-semibold text-ink dark:text-chalk">
+                  {{ cat.challengesCount ?? 0 }}
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <div class="inline-flex items-center gap-2">
+                    <template v-if="editingCategoryId === cat.id">
+                      <button
+                        type="button"
+                        :disabled="busyKey === `savecat:${cat.id}`"
+                        class="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1 text-xs font-medium text-white hover:opacity-90 cursor-pointer"
+                        @click="saveCategory(cat.id)"
+                      >
+                        <Save class="h-3.5 w-3.5" />
+                        <span>{{ state.locale === 'zh' ? '保存' : 'Save' }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded border border-border-light px-2 py-1 text-xs text-ink-muted dark:border-border-dark dark:text-chalk-muted cursor-pointer"
+                        @click="editingCategoryId = null"
+                      >
+                        {{ state.locale === 'zh' ? '取消' : 'Cancel' }}
+                      </button>
+                    </template>
+                    <template v-else>
+                      <button
+                        type="button"
+                        class="rounded border border-border-light bg-paper px-2.5 py-1 text-xs text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian dark:text-chalk cursor-pointer"
+                        @click="startEditCategory(cat)"
+                      >
+                        {{ state.locale === 'zh' ? '编辑' : 'Edit' }}
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="busyKey === `delcat:${cat.id}` || (cat.challengesCount ?? 0) > 0"
+                        :title="
+                          (cat.challengesCount ?? 0) > 0
+                            ? (state.locale === 'zh' ? '仍有项目属于该分类，请先调整项目分类后再删除' : 'Reassign projects in this category before deleting')
+                            : (state.locale === 'zh' ? '删除未使用的分类' : 'Delete unused category')
+                        "
+                        class="inline-flex items-center gap-1 rounded border border-red-700/30 bg-paper px-2 py-1 text-xs text-red-700 hover:bg-red-700/10 disabled:opacity-35 dark:border-red-400/30 dark:bg-obsidian dark:text-red-400 cursor-pointer"
+                        @click="deleteCategory(cat)"
+                      >
+                        <Trash2 class="h-3.5 w-3.5" />
+                        <span>{{ state.locale === 'zh' ? '删除' : 'Delete' }}</span>
+                      </button>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 

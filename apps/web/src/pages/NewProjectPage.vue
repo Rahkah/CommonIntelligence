@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Github } from 'lucide-vue-next';
 import {
-  PROJECT_BRIEF_SECTIONS,
+  DEFAULT_PROJECT_CATEGORIES,
   PROJECT_BRIEF_VERSION,
   PROJECT_PROPOSAL_LIMITS,
   validateProjectBrief,
+  type ChallengeCategory,
   type ProjectBriefError,
+  type ProjectCategory,
 } from '@common-intelligence/shared';
 import { apiClient } from '@/api/client';
 import { projectErrorKey } from '@/api/projectErrors';
@@ -16,12 +18,25 @@ import ProjectBriefDetails from '@/components/ProjectBriefDetails.vue';
 import { buildProjectBriefPrompt, parseProjectBrief, PROJECT_BRIEF_LIMIT, PROJECT_IDEA_LIMIT } from '@/data/projectBrief';
 import { useAppState } from '@/stores/appState';
 
-const { state, t, notify } = useAppState();
+const { state, t, loc, notify } = useAppState();
 const router = useRouter();
 const route = useRoute();
+const categories = ref<ProjectCategory[]>([...DEFAULT_PROJECT_CATEGORIES]);
+onMounted(() => {
+  apiClient.listCategories().then((list) => {
+    if (list.length > 0) categories.value = list;
+  }).catch(() => {});
+});
 const form = reactive({
   schemaVersion: PROJECT_BRIEF_VERSION,
-  name: '', domain: '', summary: '', goal: '', scoringMetric: '', acceptanceCriteria: '', githubRepo: '',
+  category: 'challenge' as ChallengeCategory,
+  name: '',
+  domain: '',
+  summary: '',
+  goal: '',
+  scoringMetric: '',
+  acceptanceCriteria: '',
+  githubRepo: '',
 });
 const idea = ref('');
 const prompt = ref('');
@@ -64,7 +79,16 @@ async function previewBrief() {
     briefError.value = result;
     return;
   }
-  Object.assign(form, result.data, { githubRepo: result.data.githubRepo ?? '' });
+  Object.assign(form, {
+    category: result.data.category ?? 'playground',
+    name: result.data.name,
+    domain: result.data.domain,
+    summary: result.data.summary,
+    goal: result.data.goal,
+    scoringMetric: result.data.scoringMetric ?? '',
+    acceptanceCriteria: result.data.acceptanceCriteria ?? '',
+    githubRepo: result.data.githubRepo ?? '',
+  });
   imported.value = true;
   await nextTick();
   previewHeading.value?.focus();
@@ -74,7 +98,17 @@ async function submit() {
   if (submitting.value || !canSubmit.value || (!manually.value && !imported.value)) return;
   error.value = undefined;
   briefError.value = undefined;
-  const result = validateProjectBrief({ ...form, githubRepo: form.githubRepo || undefined });
+  const result = validateProjectBrief({
+    schemaVersion: form.schemaVersion,
+    category: form.category,
+    name: form.name,
+    domain: form.domain,
+    summary: form.summary,
+    goal: form.goal,
+    ...(form.scoringMetric.trim() ? { scoringMetric: form.scoringMetric.trim() } : {}),
+    ...(form.acceptanceCriteria.trim() ? { acceptanceCriteria: form.acceptanceCriteria.trim() } : {}),
+    ...(form.githubRepo.trim() ? { githubRepo: form.githubRepo.trim() } : {}),
+  });
   if ('error' in result) {
     briefError.value = result;
     return;
@@ -99,7 +133,7 @@ async function submit() {
   <section class="mx-auto max-w-3xl space-y-5 px-4 py-10 sm:px-6">
     <RouterLink to="/#challenges" class="project-link">{{ t.challenge.backHome }}</RouterLink>
     <header class="flex flex-wrap items-baseline justify-between gap-2">
-      <h1 class="font-editorial text-3xl font-medium">{{ t.projects.newProject }}</h1>
+      <h1 class="font-display text-3xl font-bold">{{ t.projects.newProject }}</h1>
       <RouterLink v-if="state.user && state.dataMode === 'api'" :to="{ name: 'my-projects' }" class="project-link">
         {{ t.projects.mine }}
       </RouterLink>
@@ -113,17 +147,26 @@ async function submit() {
     </div>
     <template v-else>
       <p v-if="state.dataMode === 'demo'" class="project-panel text-sm">{{ t.projects.demo }}</p>
-      <button type="button" class="project-link" :disabled="submitting" @click="setManualMode(!manually)">
+      <button type="button" class="project-link cursor-pointer" :disabled="submitting" @click="setManualMode(!manually)">
         {{ manually ? t.projects.useAgent : t.projects.enterManually }}
       </button>
       <template v-if="!manually">
         <form class="project-panel space-y-4" @submit.prevent="generatePrompt">
           <label class="project-field">
             <span>{{ t.projects.idea }}</span>
-            <textarea v-model.trim="idea" :maxlength="PROJECT_IDEA_LIMIT" rows="4" required
-              :placeholder="t.projects.ideaExample" :disabled="submitting" @input="prompt = ''" />
+            <textarea
+              v-model.trim="idea"
+              :maxlength="PROJECT_IDEA_LIMIT"
+              rows="3"
+              required
+              :placeholder="t.projects.ideaExample"
+              :disabled="submitting"
+              @input="prompt = ''"
+            />
           </label>
-          <button class="project-button" type="submit" :disabled="!idea || submitting">{{ t.projects.generatePrompt }}</button>
+          <button class="project-button cursor-pointer" type="submit" :disabled="!idea || submitting">
+            {{ t.projects.generatePrompt }}
+          </button>
           <div v-if="prompt" class="space-y-2">
             <p class="text-sm text-ink-muted dark:text-chalk-muted">{{ t.projects.promptInstructions }}</p>
             <CopyCommandBox :text="prompt" :label="t.projects.agentPrompt" multiline class="[&_pre]:max-h-64" />
@@ -132,34 +175,47 @@ async function submit() {
         <form class="project-panel space-y-4" @submit.prevent="previewBrief">
           <label class="project-field">
             <span>{{ t.projects.pasteBrief }}</span>
-            <textarea v-model="brief" :maxlength="PROJECT_BRIEF_LIMIT" rows="5" required
-              class="font-mono" placeholder='{ "schemaVersion": 1, ... }' :disabled="submitting" @input="resetPreview" />
+            <textarea
+              v-model="brief"
+              :maxlength="PROJECT_BRIEF_LIMIT"
+              rows="5"
+              required
+              class="font-mono"
+              placeholder='{ "schemaVersion": 1, ... }'
+              :disabled="submitting"
+              @input="resetPreview"
+            />
           </label>
-          <button class="project-button" type="submit" :disabled="!brief.trim() || submitting">{{ t.projects.previewBrief }}</button>
-          <p v-if="!imported && briefErrorText" role="alert" class="text-sm text-red-700 dark:text-red-300">
+          <button class="project-button cursor-pointer" type="submit" :disabled="!brief.trim() || submitting">
+            {{ t.projects.previewBrief }}
+          </button>
+          <p v-if="!imported && briefErrorText" role="alert" class="text-sm text-red-600 dark:text-red-400">
             {{ briefErrorText }}
           </p>
         </form>
         <article v-if="imported" class="project-panel space-y-4">
-          <h2 ref="previewHeading" tabindex="-1" class="scroll-mt-20 font-semibold">{{ t.projects.briefTitle }}</h2>
+          <h2 ref="previewHeading" tabindex="-1" class="scroll-mt-20 font-display font-bold">{{ t.projects.briefTitle }}</h2>
           <div class="[overflow-wrap:anywhere]">
-            <h3 class="text-lg font-medium">{{ form.name }}</h3>
+            <h3 class="text-lg font-bold">{{ form.name }}</h3>
             <p class="text-sm text-ink-muted dark:text-chalk-muted">{{ form.domain }}</p>
           </div>
           <ProjectBriefDetails :project="form" />
-          <p v-if="error" role="alert" class="text-sm text-red-700 dark:text-red-300">{{ t.projects[error] }}</p>
-          <p v-else-if="briefErrorText" role="alert" class="text-sm text-red-700 dark:text-red-300">{{ briefErrorText }}</p>
+          <p v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ t.projects[error] }}</p>
+          <p v-else-if="briefErrorText" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ briefErrorText }}</p>
           <div class="flex flex-wrap items-center gap-4">
-            <button v-if="canSubmit" class="project-button" type="button" :disabled="submitting" @click="submit">
+            <button v-if="canSubmit" class="project-button cursor-pointer" type="button" :disabled="submitting" @click="submit">
               {{ submitting ? t.common.loading : t.projects.confirmBrief }}
             </button>
-            <button class="project-link" type="button" :disabled="submitting" @click="setManualMode(true)">{{ t.projects.editBrief }}</button>
+            <button class="project-link cursor-pointer" type="button" :disabled="submitting" @click="setManualMode(true)">
+              {{ t.projects.editBrief }}
+            </button>
           </div>
         </article>
       </template>
+
       <form v-else class="project-panel space-y-4" @submit.prevent="submit">
         <fieldset :disabled="submitting" class="space-y-4">
-          <div class="grid gap-4 sm:grid-cols-2">
+          <div class="grid gap-4 sm:grid-cols-3">
             <label class="project-field">
               <span>{{ t.projects.name }}</span>
               <input v-model.trim="form.name" required :maxlength="PROJECT_PROPOSAL_LIMITS.name" />
@@ -168,19 +224,37 @@ async function submit() {
               <span>{{ t.projects.domain }}</span>
               <input v-model.trim="form.domain" required :maxlength="PROJECT_PROPOSAL_LIMITS.domain" />
             </label>
+            <label class="project-field">
+              <span>{{ t.projects.category }}</span>
+              <select v-model="form.category">
+                <option v-for="cat in categories" :key="cat.id" :value="cat.id">
+                  {{ loc(cat.name) }}
+                </option>
+              </select>
+            </label>
           </div>
-          <label v-for="field in PROJECT_BRIEF_SECTIONS" :key="field" class="project-field">
-            <span>{{ t.projects[field] }}</span>
-            <textarea v-model.trim="form[field]" required :maxlength="PROJECT_PROPOSAL_LIMITS[field]" rows="3" />
+          <label class="project-field">
+            <span>{{ t.projects.summary }}</span>
+            <textarea v-model.trim="form.summary" required :maxlength="PROJECT_PROPOSAL_LIMITS.summary" rows="2" />
           </label>
           <label class="project-field">
-            <span>{{ t.projects.githubRepo }} ({{ t.projects.optional }})</span>
-            <input v-model.trim="form.githubRepo" type="url" :maxlength="PROJECT_PROPOSAL_LIMITS.githubRepo" placeholder="https://github.com/owner/repository" />
+            <span>{{ t.projects.goal }}</span>
+            <textarea v-model.trim="form.goal" required :maxlength="PROJECT_PROPOSAL_LIMITS.goal" rows="3" />
           </label>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="project-field">
+              <span>{{ t.projects.scoringMetric }}</span>
+              <input v-model.trim="form.scoringMetric" :maxlength="PROJECT_PROPOSAL_LIMITS.scoringMetric" />
+            </label>
+            <label class="project-field">
+              <span>{{ t.projects.githubRepo }} ({{ t.projects.optional }})</span>
+              <input v-model.trim="form.githubRepo" type="url" :maxlength="PROJECT_PROPOSAL_LIMITS.githubRepo" placeholder="https://github.com/owner/repo" />
+            </label>
+          </div>
         </fieldset>
-        <p v-if="error" role="alert" class="text-sm text-red-700 dark:text-red-300">{{ t.projects[error] }}</p>
-        <p v-else-if="briefErrorText" role="alert" class="text-sm text-red-700 dark:text-red-300">{{ briefErrorText }}</p>
-        <button v-if="canSubmit" type="submit" class="project-button" :disabled="submitting">
+        <p v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ t.projects[error] }}</p>
+        <p v-else-if="briefErrorText" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ briefErrorText }}</p>
+        <button v-if="canSubmit" type="submit" class="project-button cursor-pointer" :disabled="submitting">
           {{ submitting ? t.common.loading : t.projects.submit }}
         </button>
       </form>

@@ -176,13 +176,15 @@ hooks.post('/webhooks/github', async (c) => {
     if (parsed.success && parsed.data.base.ref === b.repository.default_branch) {
       const pr = parsed.data,
         body = pr.body ?? '',
-        kind = z.enum(CONTRIBUTION_TYPES).safeParse(metadata(body, 'Contribution Type'));
+        rawKind = metadata(body, 'Contribution Type'),
+        parsedKind = z.enum(CONTRIBUTION_TYPES).safeParse(rawKind),
+        kind = parsedKind.success ? parsedKind.data : 'Experiment';
       const parentText = metadata(body, 'Parent Contributions');
       const parents =
         !parentText || /^none$/i.test(parentText)
           ? []
           : [...new Set(parentText.split(',').map((v) => v.trim()))];
-      if (kind.success && parents.length <= 32) {
+      if (parents.length <= 32) {
         number = pr.number;
         writes.push(
           sql(
@@ -196,11 +198,11 @@ hooks.post('/webhooks/github', async (c) => {
             String(pr.user.id),
             metadata(body, 'Task ID'),
             metadata(body, 'Agent ID'),
-            kind.data,
+            kind,
             JSON.stringify(parents),
             pr.merged_by ? String(pr.merged_by.id) : null,
             Number(pr.labels.some((l) => l.name === 'verified-acceptance')),
-            section(body, 'Method') || section(body, 'Reproduction Steps'),
+            section(body, 'Method') || section(body, 'Summary') || section(body, 'Reproduction Steps'),
             section(body, '(?:Clean-Room & )?Limitations')
           )
         );

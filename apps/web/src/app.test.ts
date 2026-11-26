@@ -17,7 +17,7 @@ function createTestRouter(initialPath = '/') {
   return router;
 }
 
-describe('Common Intelligence Frontend MVP', () => {
+describe('Common Intelligence Playground Frontend', () => {
   beforeEach(() => {
     localStorage.clear();
     const { setLocale, state } = useAppState();
@@ -25,25 +25,37 @@ describe('Common Intelligence Frontend MVP', () => {
     state.user = null;
   });
 
-  it('submits a project for review and publishes it through the maintainer queue', async () => {
+  it('submits a playground idea and publishes it through the maintainer queue', async () => {
     const { state } = useAppState();
     const previousMode = state.dataMode;
     const proposal: ProjectProposal = {
-      id: 'proposal_test', name: 'Open scheduling study', domain: 'Algorithms',
-      summary: 'Compare scheduling strategies.', goal: 'Reproduce a baseline.',
-      scoringMetric: 'Completed jobs', acceptanceCriteria: 'Publish reproducible results.',
-      authorUsername: 'author', status: 'Pending', submittedAt: '2026-11-25T00:00:00.000Z',
-      reviewedAt: null, rejectionReason: null, challengeSlug: null,
+      id: 'proposal_test',
+      name: '100-AI Virtual Town',
+      domain: 'Multi-Agent Playground',
+      summary: 'Watch 100 AIs trade and build a pixel town.',
+      goal: 'Each AI runs a shop or builds roads via API.',
+      scoringMetric: 'Active shops',
+      acceptanceCriteria: 'Playable demo.',
+      authorUsername: 'author',
+      status: 'Pending',
+      submittedAt: '2026-11-26T00:00:00.000Z',
+      reviewedAt: null,
+      rejectionReason: null,
+      challengeSlug: null,
     };
     let result = proposal;
     state.dataMode = 'api';
     vi.spyOn(apiClient, 'getMe').mockResolvedValue({
-      mode: 'live', authenticated: true, user: DEMO_USERS[0]!, canReviewProjects: true,
+      mode: 'live',
+      authenticated: true,
+      user: DEMO_USERS[0]!,
+      canReviewProjects: true,
     });
     const recordActivity = vi.spyOn(apiClient, 'recordSiteActivity').mockResolvedValue();
     const joinCode = 'ci_join_' + 'a'.repeat(64);
     const join = vi.spyOn(apiClient, 'createAgentJoinCode').mockResolvedValue({
-      code: joinCode, expiresAt: '2026-11-25T00:05:00.000Z',
+      code: joinCode,
+      expiresAt: '2026-11-26T00:30:00.000Z',
     });
     const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     const submit = vi.spyOn(apiClient, 'createProjectProposal').mockResolvedValue(proposal);
@@ -52,7 +64,7 @@ describe('Common Intelligence Frontend MVP', () => {
       return { items, total: items.length, offset: 0, limit: 50 };
     });
     const publish = vi.spyOn(apiClient, 'approveProjectProposal').mockImplementation(async () => {
-      result = { ...proposal, status: 'Approved', challengeSlug: 'open-scheduling-study' };
+      result = { ...proposal, status: 'Approved', challengeSlug: '100-ai-virtual-town' };
       return result;
     });
     try {
@@ -62,64 +74,54 @@ describe('Common Intelligence Frontend MVP', () => {
       try {
         await flushPromises();
         expect(recordActivity).toHaveBeenCalledWith('/');
-        expect(wrapper.get('a[href="/projects/new"]').text()).toBe('New project');
-        expect(wrapper.get('a[href="/admin/project-proposals"]').text()).toBe('Review projects');
-        const copyJoin = wrapper.findAll('button').find((button) => button.text() === 'Copy prompt and authorize agent');
+        expect(wrapper.get('a[href="/projects/new"]').text()).toContain('New Playground');
+        expect(wrapper.get('a[href="/admin/project-proposals"]').text()).toBe('Review Ideas');
+        const copyJoin = wrapper.findAll('button').find((button) => button.text().includes('Copy 1-Click Agent Prompt'));
         expect(copyJoin).toBeDefined();
         await copyJoin!.trigger('click');
         await flushPromises();
         expect(join).toHaveBeenCalledWith('grandmaster');
         expect(copy).toHaveBeenCalledWith(expect.stringContaining(joinCode));
+        expect(copy).toHaveBeenCalledWith(expect.stringContaining('/api/agent-join/quickstart'));
+
         await router.push('/projects/new');
         await flushPromises();
         const [ideaForm, importForm] = wrapper.findAll('form');
-        const idea = 'Compare "earliest deadline first" with a pinned baseline.';
+        const idea = 'Watch 100 AIs run a virtual town.';
         await ideaForm!.get('textarea').setValue(idea);
         await ideaForm!.trigger('submit');
         expect(ideaForm!.get('pre').text()).toContain(JSON.stringify(idea));
         expect(ideaForm!.get('pre').text()).toContain('"schemaVersion": 1');
-        await ideaForm!.findAll('button').at(-1)!.trigger('click');
-        expect(copy).toHaveBeenCalledWith(expect.stringContaining(JSON.stringify(idea)));
 
-        const { name, domain, summary, goal, scoringMetric, acceptanceCriteria } = proposal;
-        const project = { name, domain, summary, goal, scoringMetric, acceptanceCriteria, githubRepo: null };
-        await importForm!.get('textarea').setValue(JSON.stringify({ schemaVersion: 2, ...project }));
+        const { name, domain, summary, goal } = proposal;
+        const minimalBrief = { schemaVersion: 1, category: 'playground', name, domain, summary, goal, githubRepo: null };
+        await importForm!.get('textarea').setValue('```json\n' + JSON.stringify(minimalBrief) + '\n```');
         await importForm!.trigger('submit');
-        expect(importForm!.get('[role="alert"]').text()).toContain('schemaVersion 1');
-        expect(submit).not.toHaveBeenCalled();
-        await importForm!.get('textarea').setValue(JSON.stringify({ schemaVersion: 1, ...project, acceptanceCriteria: '' }));
-        await importForm!.trigger('submit');
-        expect(importForm!.get('[role="alert"]').text()).toContain('acceptanceCriteria');
-        expect(submit).not.toHaveBeenCalled();
-        const brief = '```json\n' + JSON.stringify({ schemaVersion: 1, ...project }) + '\n```';
-        await importForm!.get('textarea').setValue(brief);
-        await importForm!.trigger('submit');
-        expect(wrapper.get('article').text()).toContain(acceptanceCriteria);
-        expect(submit).not.toHaveBeenCalled();
+        expect(wrapper.get('article').text()).toContain(goal);
         await wrapper.get('article button.project-button').trigger('click');
         await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/settings/project-proposals'));
         await flushPromises();
-        expect(submit).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 1, name: proposal.name }), expect.any(String));
-        expect(wrapper.text()).toContain('Pending review');
+        expect(submit).toHaveBeenCalledWith(
+          expect.objectContaining({ schemaVersion: 1, name: proposal.name }),
+          expect.any(String)
+        );
+        expect(wrapper.text()).toContain('Pending');
 
         await router.push('/admin/project-proposals');
         await flushPromises();
         await wrapper.get('article button').trigger('click');
         const review = wrapper.get('article form');
-        await review.get('input[type="url"]').setValue('https://github.com/example/schedules');
+        await review.get('input[type="url"]').setValue('https://github.com/example/town');
         const reviewInputs = review.findAll('input:not([type])');
-        await reviewInputs[1]!.setValue('verify-schedule');
-        await reviewInputs[2]!.setValue('Reproduce baseline');
-        await review.get('textarea').setValue('Compare results in CI.');
+        await reviewInputs[1]!.setValue('verify-town');
+        await reviewInputs[2]!.setValue('Live town');
+        await review.get('textarea').setValue('Run basic checks.');
         await review.trigger('submit');
         await flushPromises();
-        expect(publish).toHaveBeenCalledWith(proposal.id, expect.objectContaining({
-          slug: 'open-scheduling-study', trustedCheckName: 'verify-schedule',
-        }));
-        await router.push('/settings/project-proposals');
-        await flushPromises();
-        expect(wrapper.get('a[href="/challenges/open-scheduling-study"]').text()).toBe('View published project');
-        expect(recordActivity.mock.calls).toEqual([['/'], ['/projects/new']]);
+        expect(publish).toHaveBeenCalledWith(
+          proposal.id,
+          expect.objectContaining({ trustedCheckName: 'verify-town' })
+        );
       } finally {
         wrapper.unmount();
       }
@@ -130,29 +132,40 @@ describe('Common Intelligence Frontend MVP', () => {
     }
   });
 
-  it('renders streamlined HomePage with collaborative project hook, Grandmaster vs Stockfish 19, Open Game (64KB), Open Language, join prompt, login, and contributors', async () => {
+  it('renders minimalist HomePage with twin live playgrounds (Vote Chess vs Stockfish 19 + 1,000-AI Shared Canvas) and removes retired projects', async () => {
     const router = createTestRouter('/');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
     const text = wrapper.text();
-    expect(text).toContain('Build open projects together with your AI.');
-    expect(text).toContain('Sign in with GitHub');
-    expect(text).toContain('/challenges/grandmaster/join.txt');
+    expect(text).toContain('Drop your AI into live community playgrounds.');
+    expect(text).toContain('Crowd-Agent Challenge');
+    expect(text).toContain('Playground');
     expect(text).toContain('Project Grandmaster');
     expect(text).toContain('Stockfish 19');
-    expect(text).toContain('Open Game');
-    expect(text).toContain('64 KB');
-    expect(text).toContain('Open Language');
-    expect(text).not.toContain('Project 5904');
-    expect(text).not.toContain('TinyMind');
-    expect(text).not.toContain('Infinite Tetris');
+    expect(text).toContain('1,000-AI Shared Canvas');
+    expect(text).not.toContain('Open Game');
+    expect(text).not.toContain('Open Language');
+    expect(text).not.toContain('AI 文明模拟');
     expect(text).toContain('@elena-rostova-demo');
-    expect(text).toContain('DEMO');
+    expect(wrapper.find('canvas').exists()).toBe(true);
+
+    // Filter to Crowd-Agent Challenge -> shows Chess, hides Shared Canvas
+    await wrapper.get('button[data-category-tab="challenge"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Project Grandmaster');
+    expect(wrapper.find('canvas').exists()).toBe(false);
+
+    // Filter to Playground -> shows Shared Canvas
+    await wrapper.get('button[data-category-tab="playground"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('1,000-AI Shared Canvas');
+    expect(wrapper.find('canvas').exists()).toBe(true);
+    wrapper.unmount();
   });
 
-  it('switches language between English and Chinese', async () => {
+  it('switches language cleanly between English and Chinese', async () => {
     const router = createTestRouter('/');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
@@ -163,32 +176,94 @@ describe('Common Intelligence Frontend MVP', () => {
     await langBtn!.trigger('click');
     await flushPromises();
 
-    expect(wrapper.text()).toContain('让你的 AI，与全球 Agent 协同完成项目。');
-    expect(wrapper.text()).toContain('公共挑战');
-    expect(wrapper.text()).toContain('最强象棋引擎计划');
-    expect(wrapper.text()).toContain('64KB 开放游戏计划');
-    expect(wrapper.text()).toContain('开放语言计划');
-    expect(wrapper.text()).not.toContain('5904 计划');
-    expect(wrapper.text()).toContain('进行中');
-    expect(wrapper.text()).toContain('筹备中');
-    expect(wrapper.text()).toContain('有效贡献者');
+    const zhText = wrapper.text();
+    expect(zhText).toContain('把你的 AI 放进游乐场，和全球 Agent 一起玩。');
+    expect(zhText).toContain('AI 众筹投票棋局 vs Stockfish 19');
+    expect(zhText).toContain('当 1000 个 AI 共享同一块画布');
+    expect(zhText).toContain('社区玩家榜');
+    wrapper.unmount();
   });
 
-  it('renders public credential verification page with safe SVG image and ledger metadata', async () => {
-    const router = createTestRouter('/credentials/ci-cred-gm-0004');
+  it('renders agent-only vote chess arena without manual vote buttons, previews candidate arrows, and resolves Stockfish 19 reply', async () => {
+    const router = createTestRouter('/challenges/grandmaster');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
-    expect(wrapper.text()).toContain('ci-cred-gm-0004');
-    expect(wrapper.text()).toContain('@lin-chen-demo');
-    expect(wrapper.text()).toContain('fastchess-sprt-v1.0.0');
-    const img = wrapper.find('img[alt*="Proof of Contribution Certificate"]');
-    expect(img.exists()).toBe(true);
-    expect(img.attributes('src')).toContain('data:image/svg+xml');
+    expect(wrapper.text()).toContain('AI Swarm (White)');
+    expect(wrapper.text()).toContain('Stockfish 19');
+    expect(wrapper.text()).toContain('Be3');
+    expect(wrapper.text()).toContain('Leading Move');
+    expect(wrapper.text()).toContain('Agent-only voting & analysis');
+
+    // Verify Chess.com-style vertical evaluation bar & real-time win rates render
+    const evalBar = wrapper.get('[data-eval-bar]');
+    expect(evalBar.attributes('role')).toBe('meter');
+    expect(evalBar.text()).toContain('%');
+    expect(wrapper.text()).toContain('Win ');
+
+    // No manual +1 upvote buttons or manual vote pitch input should exist
+    const plusOne = wrapper.findAll('button').find((b) => b.text().includes('+1'));
+    expect(plusOne).toBeUndefined();
+    expect(wrapper.find('input[placeholder*="pitch"]').exists()).toBe(false);
+
+    // Verify SVG arrow is rendered for the leading move, and clicking another candidate switches it
+    const initialArrow = wrapper.get('svg[data-preview-arrow] polygon').attributes('points');
+    const initialMove = wrapper.get('svg[data-preview-arrow]').attributes('data-move');
+    expect(initialArrow).toBeTruthy();
+    const candidateRows = wrapper.findAll('li[role="button"]');
+    expect(candidateRows.length).toBeGreaterThanOrEqual(2);
+    await candidateRows[1]!.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Previewing');
+    const switchedArrow = wrapper.get('svg[data-preview-arrow] polygon').attributes('points');
+    const switchedMove = wrapper.get('svg[data-preview-arrow]').attributes('data-move');
+    expect(switchedMove).not.toBe(initialMove);
+    expect(switchedArrow).not.toBe(initialArrow);
+
+    // Notes tab should also be agent-only (no manual Post Note button)
+    const notesTab = wrapper
+      .findAll('nav[aria-label="Playground sections"] button')
+      .find((b) => b.text().includes('Notes & Fails'));
+    expect(notesTab).toBeDefined();
+    await notesTab!.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Published exclusively by registered AI agents');
+    expect(wrapper.findAll('button').find((b) => b.text().includes('Post Note / Finding'))).toBeUndefined();
+
+    // Resolve the current AI votes so Stockfish replies and advances to Round 7
+    const resolveBtn = wrapper.findAll('button').find((b) => b.text().includes('Lock Top Vote'));
+    expect(resolveBtn).toBeDefined();
+    await resolveBtn!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('Round 7');
+    wrapper.unmount();
   });
 
-  it('supports demo GitHub sign-in and scoped Agent Token creation & revocation', async () => {
+  it('renders 1,000-AI Shared Canvas playground with live palette, strokes, and notes tab', async () => {
+    const router = createTestRouter('/challenges/shared-canvas');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('1,000-AI Shared Canvas');
+    expect(wrapper.text()).toContain('/ 1000 AIs');
+    expect(wrapper.find('canvas').exists()).toBe(true);
+    expect(wrapper.find('#agent-access').exists()).toBe(true);
+
+    // Switch to Notes & Fails tab and post a new note
+    const notesTab = wrapper
+      .findAll('nav[aria-label="Playground sections"] button')
+      .find((b) => b.text().includes('Notes & Fails'));
+    expect(notesTab).toBeDefined();
+    await notesTab!.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('Northwest Rocket');
+    wrapper.unmount();
+  });
+
+  it('supports demo GitHub sign-in and Agent Token creation & revocation with relaxed defaults', async () => {
     const router = createTestRouter('/settings/tokens');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
@@ -212,21 +287,19 @@ describe('Common Intelligence Frontend MVP', () => {
     expect(revokeBtn).toBeDefined();
     await revokeBtn!.trigger('click');
     await flushPromises();
-
     expect(wrapper.text()).toContain('REVOKED');
+    wrapper.unmount();
   });
 
-  it('renders /challenges/grandmaster, /challenges/open-game, /challenges/open-language, /live, /contributors, /u/:username, and /docs cleanly', async () => {
+  it('renders public credential verification page and secondary routes cleanly', async () => {
     const checks: Array<[string, string]> = [
-      ['/challenges/grandmaster', 'Grandmaster-CI v0.1.0'],
-      ['/challenges/open-game', 'This project is waiting for its first contributor.'],
-      ['/challenges/open-language', 'This project is waiting for its first contributor.'],
-      ['/challenges/ai-civilization', 'This project is waiting for its first contributor.'],
+      ['/credentials/ci-cred-gm-0004', 'ci-cred-gm-0004'],
       ['/live', 'Live Activity'],
-      ['/contributors', 'Founding Contributor'],
-      ['/u/elena-rostova-demo', 'GitHub Profile README Badge'],
-      ['/docs', 'Contributor Guide'],
-      ['/about', 'What happens when intelligence works together?'],
+      ['/contributors', 'Founding Builder'],
+      ['/u/elena-rostova-demo', 'GitHub README Badge'],
+      ['/docs', 'Quick Guide'],
+      ['/about', 'What happens when 1,000 AIs play together?'],
+      ['/tasks?challenge=grandmaster', 'Quest Board'],
     ];
     for (const [path, expected] of checks) {
       const router = createTestRouter(path);
@@ -234,156 +307,117 @@ describe('Common Intelligence Frontend MVP', () => {
       const wrapper = mount(App, { global: { plugins: [router] } });
       await flushPromises();
       expect(wrapper.text()).toContain(expected);
-      if (path === '/live') {
-        expect(wrapper.text()).toContain('gemini-2.5-pro');
-        expect(wrapper.text()).not.toContain('sprt-auditor-jp');
-        expect(wrapper.text()).not.toContain('local-qwen-runner');
-      }
-      if (path === '/docs') {
-        expect(wrapper.find('a[href="/challenges/grandmaster/join.txt"]').exists()).toBe(true);
-        expect(wrapper.find('#governance, #protocol, #security, a[href="/docs#governance"]').exists()).toBe(false);
-        expect(wrapper.text()).not.toContain('ARCHITECTURE.md');
-      }
       wrapper.unmount();
     }
   });
 
-  it('renders /about with all five manifesto sections, honor seals specimen note, interactive loop, and Chinese toggle', async () => {
-    const router = createTestRouter('/about');
-    await router.isReady();
-    const wrapper = mount(App, { global: { plugins: [router] } });
-    await flushPromises();
-
-    // Navigation includes About
-    const aboutLinks = wrapper.findAll('a[href="/about"]');
-    expect(aboutLinks.length).toBeGreaterThanOrEqual(1);
-
-    // Strictly five core sections inside About article
-    const sections = wrapper.findAll('article > section');
-    expect(sections).toHaveLength(5);
-
-    const text = wrapper.text();
-    expect(text).toContain('What happens when intelligence works together?');
-    expect(text).toContain('Independent agents. Shared knowledge. Collective discovery.');
-    expect(text).toContain('No central AI. No isolated discoveries. One shared goal.');
-    expect(text).toContain('Discover');
-    expect(text).toContain('Collaborate');
-    expect(text).toContain('Verify');
-    expect(text).toContain('Share');
-    expect(text).toContain('Every discovery deserves to be remembered.');
-    expect(text).toContain('Illustrative Specimen');
-    expect(text).toContain('No single mind has the answer.');
-    expect(text).toContain('Together, we might.');
-    expect(text).toContain('Explore Challenges');
-    expect(text).toContain('View on GitHub');
-
-    // Interactive canvas & existing HonorSeal medallions
-    expect(wrapper.find('canvas').exists()).toBe(true);
-    expect(wrapper.findAll('article section:nth-of-type(4) svg').length).toBeGreaterThanOrEqual(6);
-
-    // Clicking a stage in the cycle diagram marks it active
-    const verifyBtn = wrapper
-      .findAll('article section:nth-of-type(3) ol button')
-      .find((b) => b.text().includes('Verify'));
-    expect(verifyBtn).toBeDefined();
-    await verifyBtn!.trigger('click');
-    expect(verifyBtn!.attributes('aria-current')).toBe('step');
-
-    // Language switch to Chinese
-    const langBtn = wrapper.findAll('button').find((b) => b.text().includes('EN / 中'));
-    expect(langBtn).toBeDefined();
-    await langBtn!.trigger('click');
-    await flushPromises();
-
-    const zhText = wrapper.text();
-    expect(zhText).toContain('当智能彼此协作，会发生什么？');
-    expect(zhText).toContain('没有中央 AI。没有孤立的发现。只有一个共同的目标。');
-    expect(zhText).toContain('每一次发现，都值得被铭记。');
-    expect(zhText).toContain('示例展示');
-    expect(zhText).toContain('探索开放挑战');
-    expect(zhText).toContain('在 GitHub 查看');
-
-    wrapper.unmount();
-  });
-
-  it('renders /tasks scheduler visualization with agent subtask decompositions and contributor completions in EN and ZH', async () => {
-    const router = createTestRouter('/tasks?challenge=grandmaster');
-    await router.isReady();
-    const wrapper = mount(App, { global: { plugins: [router] } });
-    await flushPromises();
-
-    // Default Scheduling Graph view renders SVG nodes & edges and provenance inspector
-    expect(wrapper.text()).toContain('Task Pool Scheduling Visualizer');
-    expect(wrapper.find('svg[aria-label*="Task pool decomposition"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('PLAN-GM-001');
-    expect(wrapper.text()).toContain('TASK-GM-001');
-
-    // Switch to Agent Decompositions tab: shows which subtasks each contributor's agent decomposed
-    const decompTab = wrapper.findAll('button[role="tab"]').find((b) => b.text().includes('Agent Decompositions'));
-    expect(decompTab).toBeDefined();
-    await decompTab!.trigger('click');
-    await flushPromises();
-
-    const decompText = wrapper.text();
-    expect(decompText).toContain('@elena-rostova-demo');
-    expect(decompText).toContain('claude-sonnet-4.5');
-    expect(decompText).not.toContain('grandmaster-planner-01');
-    expect(decompText).toContain('TASK-GM-001');
-    expect(decompText).toContain('TASK-GM-002');
-    expect(decompText).toContain('@kenji-takahashi-demo');
-    expect(decompText).toContain('gemini-2.5-pro');
-    expect(decompText).not.toContain('sprt-auditor-jp');
-    expect(decompText).toContain('TASK-GM-005');
-
-    // Switch to Contributor Tasks tab: shows what tasks each contributor completed (model only, never agent label)
-    const contribTab = wrapper.findAll('button[role="tab"]').find((b) => b.text().includes('Contributor Tasks'));
-    expect(contribTab).toBeDefined();
-    await contribTab!.trigger('click');
-    await flushPromises();
-
-    const contribText = wrapper.text();
-    expect(contribText).toContain('Tasks Completed by @lin-chen-demo');
-    expect(contribText).toContain('TASK-GM-001');
-    expect(contribText).toContain('Tasks Completed by @mateo-silva-demo');
-    expect(contribText).toContain('TASK-GM-008');
-    expect(contribText).not.toContain('grandmaster-planner-01');
-    expect(contribText).not.toContain('grandmaster-trainer-01');
-    expect(contribText).not.toContain('sprt-auditor-jp');
-    expect(contribText).not.toContain('nnue-kernel-smith');
-
-    // Switch to Chinese locale and verify bilingual labels
-    const langBtn = wrapper.findAll('button').find((b) => b.text().includes('EN / 中'));
-    expect(langBtn).toBeDefined();
-    await langBtn!.trigger('click');
-    await flushPromises();
-
-    const zhText = wrapper.text();
-    expect(zhText).toContain('任务池调度可视化');
-    expect(zhText).toContain('贡献者 @lin-chen-demo 完成的任务');
-    expect(zhText).toContain('@elena-rostova-demo 的 Agent 分解的子任务');
-
-    wrapper.unmount();
-  });
-
-  it('places the Send Your Agent card prominently inside the ChallengeDetailPage header above tabs', async () => {
+  it('supports Chat Human-Relay mode limited to entry classes, strips self-eval claims, and spawns Agent follow-up tasks', async () => {
     const router = createTestRouter('/challenges/grandmaster');
     await router.isReady();
     const wrapper = mount(App, { global: { plugins: [router] } });
     await flushPromises();
 
-    const header = wrapper.get('main header');
-    const agentCard = header.find('#agent-access');
-    expect(agentCard.exists()).toBe(true);
-    expect(agentCard.text()).toContain('Send Your Agent');
-    expect(agentCard.text()).toContain('/challenges/grandmaster/join.txt');
-
-    // Remains visible above tabs even when switching to Tasks tab
-    const tasksTab = wrapper.findAll('nav[aria-label="Challenge sections"] button').find((b) => b.text().includes('Tasks'));
-    expect(tasksTab).toBeDefined();
-    await tasksTab!.trigger('click');
+    // Switch to Chat Mode
+    const chatTab = wrapper.get('button[data-participation-mode="chat"]');
+    await chatTab.trigger('click');
     await flushPromises();
-    expect(wrapper.find('main header #agent-access').exists()).toBe(true);
 
+    // Entry classes are available; clicking advanced class (Forger) switches cleanly back to Agent mode
+    expect(wrapper.get('button[data-chat-class="scout"]').text()).toContain('Entry');
+    expect(wrapper.get('button[data-chat-class="arbiter"]').text()).toContain('Entry');
+    expect(wrapper.get('button[data-chat-class="forger"]').text()).toContain('Agent');
+
+    await wrapper.get('button[data-chat-class="forger"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('button[data-participation-mode="agent"]').attributes('aria-selected')).toBe('true');
+
+    // Return to Chat Mode, select Arbiter counterexample micro-task, paste reply with self-eval fields
+    await wrapper.get('button[data-participation-mode="chat"]').trigger('click');
+    await flushPromises();
+    await wrapper.get('button[data-chat-class="arbiter"]').trigger('click');
+    await flushPromises();
+
+    const sampleChatReply = `Here is the counterexample analysis:\n\`\`\`json\n${JSON.stringify({
+      schemaVersion: 1,
+      kind: 'counterexample_review',
+      title: 'Underpromotion to knight refutes naive queen-only promo pruning',
+      verdict: 'counterexample',
+      flawOrCounterexample: 'Ignoring knight underpromotions drops forced smothered mates in tactical endgames.',
+      minimalCase: 'FEN 6k1/5ppp/8/8/8/8/5pPP/6K1 b - - 0 1 with f1=N+ fork motif.',
+      verified: true,
+      measuredElo: 4000,
+      selfReportedModel: 'chatgpt-5',
+    })}\n\`\`\``;
+
+    await wrapper.get('textarea[data-chat-reply-input]').setValue(sampleChatReply);
+    await flushPromises();
+
+    // Anti-self-evaluation warning must appear before submission
+    expect(wrapper.text()).toContain('Stripped unverified self-evaluation fields');
+    expect(wrapper.text()).toContain('Valid structured contribution ready to submit!');
+
+    await wrapper.get('button[data-chat-submit-btn]').trigger('click');
+    await flushPromises();
+
+    const receipt = wrapper.get('[data-chat-receipt]');
+    expect(receipt.text()).toContain('Pending Verification');
+    expect(receipt.text()).toContain('VER-CHAT-');
+    wrapper.unmount();
+  });
+
+  it('allows voting to resign in the Stockfish arena and ends the game as 0-1 when Resign wins', async () => {
+    // Cast a Chat-relayed resign vote via demoAdapter and resolve when Resign leads
+    const voted = await apiClient.voteChessMove('grandmaster', {
+      move: 'resign',
+      agentId: 'agt_resign_1',
+      reason: 'Down a queen — concede and start fresh!',
+    });
+    expect(voted.vote.moveUci).toBe('resign');
+    expect(voted.vote.moveSan).toBe('Resign');
+    expect(voted.match.specialActions?.some((m) => m.uci === 'resign')).toBe(true);
+
+    // Give Resign the lead (3 votes vs Be3's 2 votes)
+    await apiClient.voteChessMove('grandmaster', { move: '投降', agentId: 'agt_resign_2', reason: 'Agree' });
+    await apiClient.voteChessMove('grandmaster', { move: 'surrender', agentId: 'agt_resign_3', reason: 'Reset!' });
+
+    const router = createTestRouter('/challenges/grandmaster');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-resign-preview]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('Lock Top Vote → Resign (0-1)');
+
+    const lockBtn = wrapper.findAll('button').find((b) => b.text().includes('Lock Top Vote → Resign (0-1)'));
+    expect(lockBtn).toBeDefined();
+    await lockBtn!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('AI Swarm Resigned (0-1)');
+    expect(wrapper.text()).toContain('Start Next Game');
+    wrapper.unmount();
+  });
+
+  it('lets Agent mode pick any of the 5 raid classes + budget tier + run mode on both HomePage and ChallengeDetailPage', async () => {
+    const router = createTestRouter('/challenges/grandmaster');
+    await router.isReady();
+    const wrapper = mount(App, { global: { plugins: [router] } });
+    await flushPromises();
+
+    // Agent mode is active by default and displays Auto + all 5 classes
+    for (const cid of ['auto', 'scout', 'arbiter', 'forger', 'tactician', 'pioneer']) {
+      expect(wrapper.find(`button[data-agent-class="${cid}"]`).exists()).toBe(true);
+    }
+
+    await wrapper.get('button[data-agent-class="forger"]').trigger('click');
+    await wrapper.get('button[data-agent-budget="L"]').trigger('click');
+    await wrapper.get('button[data-agent-cadence="continuous"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('button[data-agent-class="forger"]').attributes('aria-pressed')).toBe('true');
+    expect(wrapper.text()).toContain('Class: Forger');
+    expect(wrapper.text()).toContain('Budget: L');
+    expect(wrapper.text()).toContain('Mode: continuous');
     wrapper.unmount();
   });
 });

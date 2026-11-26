@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { type App, type Bindings, after, Fault, fail, iso, now, rate, sql } from './core';
 import { adminConsole } from './admin';
 import { auth, bearer } from './auth';
+import { canvas } from './canvas';
+import { chatRelay } from './chat-relay';
+import { chess, resolveDueChessMatches } from './chess';
 import { catalog } from './public';
 import { projectProposals } from './project-proposals';
 import { work, expire, replenish, replenishStanding } from './tasks';
@@ -47,6 +50,9 @@ app.use(
 );
 app.route('/', adminConsole);
 app.route('/', auth);
+app.route('/', canvas);
+app.route('/', chatRelay);
+app.route('/', chess);
 app.route('/', work);
 app.route('/', projectProposals);
 app.route('/', traffic);
@@ -117,6 +123,7 @@ export async function sweep(db: D1Database) {
     LIMIT 20`
   ).all<{ task_id: string }>();
   for (const row of rows.results) await reconcile(db, row.task_id);
+  await resolveDueChessMatches(db);
 }
 export default {
   fetch: app.fetch,

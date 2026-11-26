@@ -11,26 +11,26 @@ const { state, t, toggleTheme, toggleLocale, signInWithGitHub, signOut } = useAp
 const mobileOpen = ref(false);
 
 const navItems = [
-  { to: '/about', key: 'about' as const },
-  { to: '/challenges/grandmaster', key: 'challenges' as const },
+  { to: '/', key: 'explore' as const },
+  { to: '/challenges/grandmaster', key: 'chess' as const },
+  { to: '/challenges/shared-canvas', key: 'canvas' as const },
   { to: '/tasks', key: 'tasks' as const },
   { to: '/live', key: 'live' as const },
   { to: '/contributors', key: 'contributors' as const },
-  { to: '/docs', key: 'docs' as const },
 ];
 
 function isActive(path: string): boolean {
-  if (path.startsWith('/challenges')) return route.path.startsWith('/challenges');
-  return route.path === path;
+  if (path === '/') return route.path === '/';
+  return route.path === path || route.path.startsWith(path + '/');
 }
 </script>
 
 <template>
   <header
-    class="sticky top-0 z-40 border-b border-border-light bg-paper/95 backdrop-blur-xs dark:border-border-dark dark:bg-obsidian/95"
+    class="sticky top-0 z-40 border-b border-border-light bg-paper/90 backdrop-blur-md dark:border-border-dark dark:bg-obsidian/90"
   >
     <div class="mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-      <div class="flex items-center gap-6">
+      <div class="flex items-center gap-5">
         <RouterLink to="/" class="flex items-center gap-2 focus:outline-none">
           <BrandLogo :size="26" />
         </RouterLink>
@@ -40,10 +40,10 @@ function isActive(path: string): boolean {
             v-for="item in navItems"
             :key="item.to"
             :to="item.to"
-            class="rounded px-2.5 py-1.5 text-[13.5px] font-medium transition"
+            class="rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium transition"
             :class="
               isActive(item.to)
-                ? 'bg-subtle text-ink dark:bg-obsidian-subtle dark:text-chalk'
+                ? 'bg-accent/12 text-accent dark:bg-accent-dark/15 dark:text-accent-dark'
                 : 'text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk'
             "
           >
@@ -53,21 +53,19 @@ function isActive(path: string): boolean {
       </div>
 
       <div class="flex items-center gap-2">
-        <!-- Language Toggle -->
         <button
           type="button"
-          class="inline-flex h-8 items-center gap-1 rounded border border-border-light px-2 font-mono text-[11.5px] text-ink-muted transition hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
-          :title="state.locale === 'en' ? 'Switch to Chinese' : '切换为英文'"
+          class="inline-flex h-8 items-center gap-1 rounded-lg border border-border-light px-2.5 font-mono text-[11.5px] text-ink-muted transition hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
+          :title="state.locale === 'en' ? '切换中文' : 'Switch to English'"
           @click="toggleLocale"
         >
           <Globe class="h-3.5 w-3.5" />
           <span>{{ state.locale === 'en' ? 'EN / 中' : '中 / EN' }}</span>
         </button>
 
-        <!-- Theme Toggle -->
         <button
           type="button"
-          class="inline-flex h-8 w-8 items-center justify-center rounded border border-border-light text-ink-muted transition hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-light text-ink-muted transition hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
           :aria-label="state.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
           @click="toggleTheme"
         >
@@ -75,31 +73,26 @@ function isActive(path: string): boolean {
           <Moon v-else class="h-4 w-4" />
         </button>
 
-        <!-- Auth Controls (Desktop) -->
         <div class="hidden items-center gap-2 sm:flex">
           <template v-if="state.user">
             <RouterLink
               to="/settings/tokens"
-              class="inline-flex h-8 items-center gap-1.5 rounded border border-border-light px-2.5 text-xs font-medium text-ink-muted transition hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk"
+              class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border-light px-2.5 text-xs font-medium text-ink-muted transition hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk"
             >
               <KeyRound class="h-3.5 w-3.5" />
               <span>{{ t.nav.tokens }}</span>
             </RouterLink>
             <RouterLink
               :to="`/u/${state.user.username}`"
-              class="inline-flex h-8 items-center gap-2 rounded border border-border-light bg-surface px-2.5 text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
+              class="inline-flex h-8 items-center gap-2 rounded-lg border border-border-light bg-surface px-2.5 text-xs font-medium text-ink hover:border-accent dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
             >
-              <img
-                :src="state.user.avatarUrl"
-                :alt="state.user.username"
-                class="h-4 w-4 rounded-sm"
-              />
+              <img :src="state.user.avatarUrl" :alt="state.user.username" class="h-4 w-4 rounded-sm" />
               <span class="font-mono">@{{ state.user.username }}</span>
               <StatusPill v-if="state.user.isDemo" label="DEMO" tone="demo" />
             </RouterLink>
             <button
               type="button"
-              class="inline-flex h-8 w-8 items-center justify-center rounded border border-border-light text-ink-muted hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-light text-ink-muted hover:text-ink dark:border-border-dark dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
               :title="t.nav.signOut"
               @click="signOut"
             >
@@ -109,7 +102,7 @@ function isActive(path: string): boolean {
           <button
             v-else
             type="button"
-            class="inline-flex h-8 items-center gap-1.5 rounded bg-ink px-3 text-xs font-medium text-paper transition hover:opacity-90 dark:bg-chalk dark:text-obsidian cursor-pointer"
+            class="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-semibold text-white transition hover:opacity-90 dark:bg-accent-dark dark:text-obsidian cursor-pointer"
             @click="signInWithGitHub"
           >
             <Github class="h-3.5 w-3.5" />
@@ -117,10 +110,9 @@ function isActive(path: string): boolean {
           </button>
         </div>
 
-        <!-- Mobile Menu Button -->
         <button
           type="button"
-          class="inline-flex h-8 w-8 items-center justify-center rounded border border-border-light text-ink-muted md:hidden dark:border-border-dark dark:text-chalk-muted cursor-pointer"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-light text-ink-muted md:hidden dark:border-border-dark dark:text-chalk-muted cursor-pointer"
           aria-label="Toggle navigation"
           @click="mobileOpen = !mobileOpen"
         >
@@ -130,7 +122,6 @@ function isActive(path: string): boolean {
       </div>
     </div>
 
-    <!-- Mobile Navigation Panel -->
     <div
       v-if="mobileOpen"
       class="border-t border-border-light bg-surface px-4 py-3 md:hidden dark:border-border-dark dark:bg-obsidian-surface"
@@ -140,14 +131,14 @@ function isActive(path: string): boolean {
           v-for="item in navItems"
           :key="item.to"
           :to="item.to"
-          class="rounded px-3 py-2 text-sm font-medium text-ink dark:text-chalk"
+          class="rounded-lg px-3 py-2 text-sm font-medium text-ink dark:text-chalk"
           @click="mobileOpen = false"
         >
           {{ t.nav[item.key] }}
         </RouterLink>
         <RouterLink
           to="/settings/tokens"
-          class="rounded px-3 py-2 text-sm font-medium text-ink dark:text-chalk"
+          class="rounded-lg px-3 py-2 text-sm font-medium text-ink dark:text-chalk"
           @click="mobileOpen = false"
         >
           {{ t.nav.tokens }}
@@ -165,10 +156,7 @@ function isActive(path: string): boolean {
               <button
                 type="button"
                 class="text-xs text-ink-muted underline dark:text-chalk-muted"
-                @click="
-                  signOut();
-                  mobileOpen = false;
-                "
+                @click="signOut(); mobileOpen = false;"
               >
                 {{ t.nav.signOut }}
               </button>
@@ -177,11 +165,8 @@ function isActive(path: string): boolean {
           <button
             v-else
             type="button"
-            class="inline-flex w-full items-center justify-center gap-1.5 rounded bg-ink px-3 py-2 text-xs font-medium text-paper dark:bg-chalk dark:text-obsidian"
-            @click="
-              signInWithGitHub();
-              mobileOpen = false;
-            "
+            class="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white dark:bg-accent-dark dark:text-obsidian"
+            @click="signInWithGitHub(); mobileOpen = false;"
           >
             <Github class="h-3.5 w-3.5" />
             <span>{{ t.nav.signIn }}</span>

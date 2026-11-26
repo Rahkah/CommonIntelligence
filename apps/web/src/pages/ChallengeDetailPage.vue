@@ -1,44 +1,58 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import type {
-  Challenge,
-  Contribution,
-  ResearchArtifact,
-  Task,
-  TaskPriority,
-  TaskStatus,
-  TaskType,
-  UserProfileSummary,
+import {
+  DEFAULT_PROJECT_CATEGORIES,
+  getRaidClass,
+  inferTaskSupportedModes,
+  type Challenge,
+  type Contribution,
+  type ProjectCategory,
+  type ResearchArtifact,
+  type Task,
+  type TaskPriority,
+  type TaskStatus,
+  type TaskType,
+  type UserProfileSummary,
 } from '@common-intelligence/shared';
 import {
   AlertTriangle,
   ArrowLeft,
-  Bot,
   ExternalLink,
   FileText,
   Github,
   Plus,
+  Sparkles,
   Terminal,
   X,
 } from 'lucide-vue-next';
-import ContributionLineageGraph from '@/components/ContributionLineageGraph.vue';
 import AgentJoinPrompt from '@/components/AgentJoinPrompt.vue';
-import ProjectPhaseRoadmap from '@/components/ProjectPhaseRoadmap.vue';
 import ProjectShowcasePanel from '@/components/ProjectShowcasePanel.vue';
-import RecordProgressionChart from '@/components/RecordProgressionChart.vue';
 import StatusPill from '@/components/StatusPill.vue';
 import TaskPoolVisualizer from '@/components/TaskPoolVisualizer.vue';
 import { apiClient } from '@/api/client';
 import { useAppState } from '@/stores/appState';
 
-type ChallengeTab = 'overview' | 'tasks' | 'knowledge' | 'lineage' | 'contributors';
+type ChallengeTab = 'overview' | 'tasks' | 'knowledge' | 'contributors';
 
 const route = useRoute();
-const { t, loc, challengeName, challengeStatus, metricDisplay, state, notify } = useAppState();
+const { t, loc, challengeName, challengeStatus, state, notify } = useAppState();
+const L = (en: string, zh: string) => (state.locale === 'zh' ? zh : en);
 
 const challenge = ref<Challenge | null>(null);
+const categories = ref<ProjectCategory[]>([...DEFAULT_PROJECT_CATEGORIES]);
 const tasks = ref<Task[]>([]);
+
+const challengeCategoryLabel = computed(() => {
+  const ch = challenge.value;
+  if (!ch) return '';
+  const catId = ch.category || (ch.slug === 'shared-canvas' ? 'playground' : 'challenge');
+  const found = categories.value.find((c) => c.id === catId);
+  if (found) return loc(found.name);
+  if (catId === 'playground') return L('Playground', '游乐场');
+  if (catId === 'challenge') return L('Crowd-Agent Challenge', '众筹 Agent 挑战');
+  return catId;
+});
 const knowledge = ref<ResearchArtifact[]>([]);
 const contributions = ref<Contribution[]>([]);
 const contributors = ref<UserProfileSummary[]>([]);
@@ -52,179 +66,34 @@ async function focusAgentAccess() {
   agentAccess.value?.scrollIntoView({ block: 'start' });
 }
 
-// Task filters & presentation mode
-const taskViewMode = ref<'visual' | 'list'>('visual');
-const statusFilter = ref<TaskStatus | 'ALL'>('ALL');
-const typeFilter = ref<TaskType | 'ALL'>('ALL');
+const taskViewMode = ref<'list' | 'visual'>('list');
 
-// Propose Task Modal
+// Add Open Quest Modal (direct into Available!)
 const proposeOpen = ref(false);
 const proposeSubmitting = ref(false);
 const proposeForm = reactive({
   title: '',
   description: '',
-  taskType: 'Search' as TaskType,
+  taskType: 'Implementation' as TaskType,
   priority: 'Normal' as TaskPriority,
-  dependenciesText: '',
-  capabilitiesText: 'rust-or-python',
-  acceptanceCriteriaText: '',
-  outputRequirements: '',
-});
-
-const progressPct = computed<number | null>(() => {
-  const ch = challenge.value;
-  if (!ch) return null;
-  const rec = ch.record;
-  if (
-    rec.currentBestValue !== undefined &&
-    rec.targetValue !== undefined &&
-    rec.scaleStartValue !== undefined &&
-    rec.targetValue !== rec.scaleStartValue
-  ) {
-    const raw =
-      rec.scoreDirection === 'lower'
-        ? ((rec.scaleStartValue - rec.currentBestValue) / (rec.scaleStartValue - rec.targetValue)) * 100
-        : ((rec.currentBestValue - rec.scaleStartValue) / (rec.targetValue - rec.scaleStartValue)) * 100;
-    return Math.min(100, Math.max(0, Math.round(raw)));
-  }
-  const totalTasks = ch.stats.completedTasksCount + ch.stats.openTasksCount + ch.stats.activeLeasesCount;
-  if (totalTasks > 0) {
-    return Math.min(100, Math.max(0, Math.round((ch.stats.completedTasksCount / totalTasks) * 100)));
-  }
-  return null;
-});
-
-const filteredTasks = computed(() =>
-  tasks.value.filter((task) => {
-    if (statusFilter.value !== 'ALL' && task.status !== statusFilter.value) return false;
-    if (typeFilter.value !== 'ALL' && task.taskType !== typeFilter.value) return false;
-    return true;
-  })
-);
-
-function detectTaskPhase(task: Task): number | null {
-  const title = `${task.title.zh} ${task.title.en}`;
-  if (/阶段零|阶段0|Phase\s*0\b/i.test(title)) return 0;
-  if (/阶段一|Phase\s*1\b/i.test(title)) return 1;
-  if (/阶段二|Phase\s*2\b/i.test(title)) return 2;
-  if (/阶段三|Phase\s*3\b/i.test(title)) return 3;
-  return null;
-}
-
-const groupedTasks = computed(() => {
-  const buckets = new Map<number, Task[]>();
-  const others: Task[] = [];
-  for (const task of filteredTasks.value) {
-    const phase = detectTaskPhase(task);
-    if (phase !== null) {
-      const list = buckets.get(phase) ?? [];
-      list.push(task);
-      buckets.set(phase, list);
-    } else {
-      others.push(task);
-    }
-  }
-  const groups: Array<{ key: string; heading: string | null; items: Task[] }> = [];
-  const zhNames: Record<number, string> = {
-    0: '第零阶段 · 项目初始化与实时成果展示（Phase 0）',
-    1: '第一阶段 · 基础能力与核心算法优化',
-    2: '第二阶段 · 棋力与计算效率进阶',
-    3: '第三阶段 · 极限优化与里程碑挑战',
-  };
-  const enNames: Record<number, string> = {
-    0: 'Phase 0 · Project Foundation & Live Showcase',
-    1: 'Phase 1 · Core Capabilities & Optimization',
-    2: 'Phase 2 · Scaling & Performance',
-    3: 'Phase 3 · Benchmark Challenge & Release',
-  };
-  for (const phase of [0, 1, 2, 3]) {
-    const items = buckets.get(phase);
-    if (items && items.length > 0) {
-      groups.push({
-        key: `phase-${phase}`,
-        heading: (state.locale === 'zh' ? zhNames[phase] : enNames[phase]) ?? null,
-        items,
-      });
-    }
-  }
-  if (others.length > 0) {
-    groups.push({
-      key: 'other',
-      heading:
-        groups.length > 0
-          ? state.locale === 'zh'
-            ? '扩展与社区提案任务'
-            : 'Additional & Community Tasks'
-          : null,
-      items: others,
-    });
-  }
-  return groups;
 });
 
 function taskStatusLabel(status: TaskStatus): string {
-  if (state.locale !== 'zh') return status;
+  if (state.locale !== 'zh') return status === 'Available' ? 'Open' : status;
   const map: Record<TaskStatus, string> = {
     Available: '可认领',
-    Pending: '待前置解锁',
-    Proposed: '待审核',
+    Pending: '待解锁',
+    Proposed: '提案中',
     Leased: '进行中',
     Submitted: '已提交',
     Verifying: '验证中',
-    Accepted: '已验收',
-    Rejected: '已驳回',
-    Blocked: '已阻塞',
+    Accepted: '已完成',
+    Rejected: '已关闭',
+    Blocked: '阻塞',
     Cancelled: '已取消',
   };
   return map[status] ?? status;
 }
-
-const verifiedKnowledge = computed(() =>
-  knowledge.value.filter((k) => k.status === 'Verified' || k.status === 'Reproduced')
-);
-const deadEndKnowledge = computed(() => knowledge.value.filter((k) => k.status === 'Refuted'));
-const openKnowledge = computed(() =>
-  knowledge.value.filter((k) => k.status === 'Proposed' || k.status === 'Inconclusive')
-);
-
-const availableTabs = computed<Array<{ id: ChallengeTab; label: string; count?: number }>>(() => [
-  { id: 'overview', label: t.value.challenge.tabs.overview },
-  { id: 'tasks', label: t.value.challenge.tabs.tasks, count: tasks.value.length },
-  { id: 'knowledge', label: t.value.challenge.tabs.knowledge, count: knowledge.value.length },
-  { id: 'lineage', label: t.value.challenge.tabs.lineage, count: contributions.value.length },
-  { id: 'contributors', label: t.value.challenge.tabs.contributors, count: contributors.value.length },
-]);
-
-async function loadData(slug: string) {
-  loading.value = true;
-  try {
-    const ch = await apiClient.getChallenge(slug);
-    challenge.value = ch;
-    if (!ch) return;
-    const [taskList, knowList, contribList, allUsers] = await Promise.all([
-      apiClient.listTasks(ch.id),
-      apiClient.listKnowledge(ch.id),
-      apiClient.listContributions(ch.id),
-      apiClient.listContributors(),
-    ]);
-    tasks.value = taskList;
-    knowledge.value = knowList;
-    contributions.value = contribList;
-    const ids = new Set(contribList.map((c) => c.contributorGithubId));
-    contributors.value = allUsers.filter((u) => ids.has(u.githubId));
-  } finally {
-    loading.value = false;
-    if (route.hash === '#agent-access' && challenge.value?.status === 'Active') void focusAgentAccess();
-  }
-}
-
-onMounted(() => loadData(String(route.params.slug ?? 'grandmaster')));
-watch(
-  () => route.params.slug,
-  (slug) => {
-    if (slug) loadData(String(slug));
-  }
-);
 
 function taskStatusTone(status: TaskStatus) {
   switch (status) {
@@ -248,6 +117,48 @@ function taskStatusTone(status: TaskStatus) {
   }
 }
 
+const availableTabs = computed<Array<{ id: ChallengeTab; label: string; count?: number }>>(() => [
+  { id: 'overview', label: t.value.challenge.tabs.overview },
+  { id: 'tasks', label: t.value.challenge.tabs.tasks, count: tasks.value.length },
+  { id: 'knowledge', label: t.value.challenge.tabs.knowledge, count: knowledge.value.length },
+  { id: 'contributors', label: t.value.challenge.tabs.contributors, count: contributors.value.length },
+]);
+
+async function loadData(slug: string, silent = false) {
+  if (!silent) loading.value = true;
+  try {
+    const ch = await apiClient.getChallenge(slug);
+    challenge.value = ch;
+    if (!ch) return;
+    const [taskList, knowList, contribList, allUsers, catList] = await Promise.all([
+      apiClient.listTasks(ch.id),
+      apiClient.listKnowledge(ch.id),
+      apiClient.listContributions(ch.id),
+      apiClient.listContributors(),
+      apiClient.listCategories().catch(() => [...DEFAULT_PROJECT_CATEGORIES]),
+    ]);
+    tasks.value = taskList;
+    knowledge.value = knowList;
+    contributions.value = contribList;
+    if (catList.length > 0) categories.value = catList;
+    const ids = new Set(contribList.map((c) => c.contributorGithubId));
+    contributors.value = allUsers.filter((u) => ids.has(u.githubId) || u.challengesJoined.includes(ch.slug));
+  } finally {
+    if (!silent) {
+      loading.value = false;
+      if (route.hash === '#agent-access' && challenge.value?.status === 'Active') void focusAgentAccess();
+    }
+  }
+}
+
+onMounted(() => loadData(String(route.params.slug ?? 'grandmaster')));
+watch(
+  () => route.params.slug,
+  (slug) => {
+    if (slug) loadData(String(slug));
+  }
+);
+
 async function submitTaskProposal() {
   if (!challenge.value || !proposeForm.title.trim() || !proposeForm.description.trim()) return;
   proposeSubmitting.value = true;
@@ -258,33 +169,13 @@ async function submitTaskProposal() {
       description: proposeForm.description.trim(),
       taskType: proposeForm.taskType,
       priority: proposeForm.priority,
-      dependencies: proposeForm.dependenciesText
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      requiredCapabilities: proposeForm.capabilitiesText
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      acceptanceCriteria: proposeForm.acceptanceCriteriaText
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean),
-      outputRequirements:
-        proposeForm.outputRequirements.trim() || 'Reproducible Pull Request matching challenge template.',
     });
     tasks.value = [created, ...tasks.value];
     proposeOpen.value = false;
     proposeForm.title = '';
     proposeForm.description = '';
-    proposeForm.acceptanceCriteriaText = '';
-    proposeForm.outputRequirements = '';
     activeTab.value = 'tasks';
-    notify(
-      state.locale === 'zh'
-        ? `已提交任务提案 ${created.taskId}（状态：Proposed）`
-        : `Task proposal ${created.taskId} submitted (Status: Proposed)`
-    );
+    notify(L(`Quest ${created.taskId} is now live!`, `新任务 ${created.taskId} 已直接开放！`));
   } finally {
     proposeSubmitting.value = false;
   }
@@ -295,7 +186,7 @@ async function submitTaskProposal() {
   <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
     <RouterLink
       to="/"
-      class="inline-flex items-center gap-1.5 text-xs font-medium text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+      class="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
     >
       <ArrowLeft class="h-3.5 w-3.5" />
       <span>{{ t.challenge.backHome }}</span>
@@ -305,225 +196,117 @@ async function submitTaskProposal() {
       {{ t.common.loading }}
     </div>
 
-    <div v-else-if="!challenge" class="mt-8 rounded border border-border-light p-8 text-center dark:border-border-dark">
-      <h1 class="text-lg font-semibold text-ink dark:text-chalk">Challenge not found</h1>
+    <div v-else-if="!challenge" class="mt-8 rounded-2xl border border-border-light p-8 text-center dark:border-border-dark">
+      <h1 class="font-display text-lg font-bold text-ink dark:text-chalk">Playground not found</h1>
     </div>
 
     <template v-else>
-      <!-- Challenge Header: Name, Summary, Progress & Active Agents at a Glance -->
-      <header class="mt-5 border-b border-border-light pb-6 dark:border-border-dark">
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="space-y-2.5">
-            <div class="flex flex-wrap items-center gap-2">
-              <StatusPill
-                :label="challengeStatus(challenge.status)"
-                :tone="challenge.status === 'Active' ? 'accent' : 'neutral'"
-                :mono="state.locale !== 'zh'"
-              />
-              <StatusPill :label="loc(challenge.domain)" tone="neutral" :mono="false" />
-              <StatusPill v-if="challenge.isDemoStats" label="DEMO" tone="demo" />
-            </div>
-            <h1 class="project-title-highlight font-editorial text-3xl font-semibold tracking-tight sm:text-4xl">
-              {{ challengeName(challenge) }}
-            </h1>
-            <p class="max-w-3xl text-base leading-relaxed text-ink-muted dark:text-chalk-muted">
-              {{ loc(challenge.tagline) }}
-            </p>
-          </div>
-
+      <!-- Compact Header -->
+      <header class="mt-4 flex flex-wrap items-start justify-between gap-4">
+        <div class="space-y-2">
           <div class="flex flex-wrap items-center gap-2">
-            <a
-              :href="challenge.githubRepo"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1.5 rounded border border-border-light bg-surface px-3 py-1.5 font-mono text-xs text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk dark:hover:border-chalk/40"
-            >
-              <Github class="h-3.5 w-3.5" />
-              <span>{{ t.challenge.repository }}</span>
-              <ExternalLink class="h-3 w-3" />
-            </a>
-            <button
-              v-if="challenge.status === 'Active'"
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded bg-ink px-3 py-1.5 text-xs font-medium text-paper hover:opacity-90 dark:bg-chalk dark:text-obsidian cursor-pointer"
-              @click="proposeOpen = true"
-            >
-              <Plus class="h-3.5 w-3.5" />
-              <span>{{ t.challenge.proposeTask }}</span>
-            </button>
+            <StatusPill :label="challengeCategoryLabel" tone="info" :mono="false" />
+            <StatusPill :label="challengeStatus(challenge.status)" tone="accent" :mono="false" />
+            <StatusPill :label="loc(challenge.domain)" tone="neutral" :mono="false" />
+            <StatusPill v-if="challenge.isDemoStats" label="DEMO" tone="demo" />
           </div>
+          <h1 class="font-display text-3xl font-bold tracking-tight text-ink sm:text-4xl dark:text-chalk">
+            {{ challengeName(challenge) }}
+          </h1>
+          <p class="max-w-3xl text-base text-ink-muted dark:text-chalk-muted">
+            {{ loc(challenge.tagline) }}
+          </p>
         </div>
 
-        <!-- Prominent Hero Card: Send Your Agent (Above the Fold) -->
-        <section
-          v-if="challenge.status === 'Active'"
-          ref="agentAccess"
-          id="agent-access"
-          tabindex="-1"
-          aria-labelledby="agent-access-heading"
-          class="mt-5 scroll-mt-20 rounded-lg border-2 border-accent/45 bg-gradient-to-r from-accent/[0.08] via-surface to-surface p-4 shadow-sm sm:p-5 dark:border-accent-dark/45 dark:from-accent-dark/[0.12] dark:via-obsidian-surface dark:to-obsidian-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:focus-visible:ring-accent-dark"
-        >
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="space-y-1">
-              <div class="flex items-center gap-2">
-                <span
-                  class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-accent/15 text-accent dark:bg-accent-dark/20 dark:text-accent-dark"
-                >
-                  <Terminal class="h-3.5 w-3.5" aria-hidden="true" />
-                </span>
-                <h2 id="agent-access-heading" class="text-base font-semibold tracking-tight text-ink dark:text-chalk">
-                  {{ t.challenge.agentAccess }}
-                </h2>
-              </div>
-              <p class="text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ t.home.joinSubtitle }}
-              </p>
-            </div>
-            <a
-              :href="challenge.joinInstructionsPath"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1.5 rounded border border-border-light bg-paper px-2.5 py-1 font-mono text-xs text-ink-muted transition hover:border-ink/40 hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted dark:hover:border-chalk/40 dark:hover:text-chalk"
-            >
-              <FileText class="h-3.5 w-3.5" aria-hidden="true" />
-              <span>{{ t.home.viewJoinTxt }}</span>
-            </a>
-          </div>
-
-          <div class="mt-3.5">
-            <AgentJoinPrompt
-              :challenge-id="challenge.id"
-              :slug="challenge.slug"
-              :instructions-path="challenge.joinInstructionsPath"
-            />
-          </div>
-        </section>
-
-        <!-- Proposed Warning Banner -->
-        <div
-          v-else
-          ref="agentAccess"
-          id="agent-access"
-          tabindex="-1"
-          class="mt-5 scroll-mt-20 flex items-start gap-2.5 rounded-md border border-amber-700/25 bg-amber-50/70 p-3.5 text-xs text-amber-950 dark:border-amber-400/25 dark:bg-amber-950/30 dark:text-amber-200"
-        >
-          <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
-          <div>
-            <div class="font-semibold">{{ t.challenge.agentAccess }}</div>
-            <p class="mt-0.5">{{ t.challenge.proposedNotice }}</p>
-          </div>
-        </div>
-
-        <!-- At-a-Glance Summary: Progress + Active Agents -->
-        <div class="mt-4 grid gap-4 md:grid-cols-[2fr_1fr]">
-          <!-- Project Progress -->
-          <div class="flex flex-col justify-between rounded-lg border border-border-light bg-surface p-5 dark:border-border-dark dark:bg-obsidian-surface">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-sm font-medium text-ink-muted dark:text-chalk-muted">
-                {{ t.challenge.progressLabel }}
-              </span>
-              <span
-                v-if="progressPct !== null"
-                class="font-mono text-sm font-semibold tabular-nums text-accent dark:text-accent-dark"
-              >
-                {{ progressPct }}%
-              </span>
-            </div>
-
-            <div class="mt-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span class="font-mono text-2xl font-semibold tabular-nums text-ink sm:text-3xl dark:text-chalk">
-                {{ metricDisplay(challenge.record.currentBestDisplay) }}
-              </span>
-              <span class="text-sm text-ink-muted dark:text-chalk-muted">
-                → {{ t.challenge.targetPrefix }} {{ challenge.record.targetDisplay }}
-              </span>
-              <a
-                v-if="challenge.record.sourceUrl && !challenge.record.sourceLabel"
-                :href="challenge.record.sourceUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="project-link"
-              >{{ t.projects.baselineSource }}</a>
-            </div>
-
-            <div
-              v-if="progressPct !== null"
-              class="mt-3.5 h-2 w-full overflow-hidden rounded-full bg-subtle dark:bg-obsidian-subtle"
-            >
-              <div
-                class="h-full rounded-full bg-accent transition-all dark:bg-accent-dark"
-                :style="{ width: `${progressPct}%` }"
-              />
-            </div>
-
-            <div class="mt-3.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-ink-muted dark:text-chalk-muted">
-              <span>
-                <strong class="font-mono font-semibold text-ink dark:text-chalk">
-                  {{ challenge.stats.verifiedContributionsCount }}
-                </strong>
-                {{ state.locale === 'zh' ? '项已验证进展' : 'verified contributions' }}
-              </span>
-              <span>
-                <strong class="font-mono font-semibold text-ink dark:text-chalk">
-                  {{ challenge.stats.completedTasksCount }}
-                </strong>
-                {{ state.locale === 'zh' ? '个已完成任务' : 'completed tasks' }}
-              </span>
-              <span>
-                <strong class="font-mono font-semibold text-ink dark:text-chalk">
-                  {{ challenge.stats.openTasksCount }}
-                </strong>
-                {{ state.locale === 'zh' ? '个待认领任务' : 'open tasks' }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Active Agents Count -->
-          <div class="flex flex-col justify-between rounded-lg border border-border-light bg-surface p-5 dark:border-border-dark dark:bg-obsidian-surface">
-            <div class="flex items-center justify-between gap-2">
-              <span class="inline-flex items-center gap-1.5 text-sm font-medium text-ink-muted dark:text-chalk-muted">
-                <Bot class="h-4 w-4 text-accent dark:text-accent-dark" />
-                <span>{{ t.challenge.activeAgentsLabel }}</span>
-              </span>
-              <span
-                class="h-2 w-2 rounded-full"
-                :class="
-                  challenge.stats.activeLeasesCount > 0
-                    ? 'bg-accent dark:bg-accent-dark'
-                    : 'bg-border-light dark:bg-border-dark'
-                "
-              />
-            </div>
-
-            <div class="mt-2.5 flex items-baseline gap-2">
-              <span class="font-mono text-3xl font-semibold tabular-nums text-ink sm:text-4xl dark:text-chalk">
-                {{ challenge.stats.activeLeasesCount }}
-              </span>
-              <span class="text-sm text-ink-muted dark:text-chalk-muted">
-                {{ state.locale === 'zh' ? '个正在协作' : 'running now' }}
-              </span>
-            </div>
-
-            <div class="mt-3.5 text-xs text-ink-muted dark:text-chalk-muted">
-              <strong class="font-mono font-semibold text-ink dark:text-chalk">
-                {{ challenge.stats.contributorsCount }}
-              </strong>
-              {{ state.locale === 'zh' ? '位已署名贡献者' : 'verified contributors' }}
-            </div>
-          </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <a
+            :href="challenge.githubRepo"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-1.5 rounded-xl border border-border-light bg-surface px-3 py-2 font-mono text-xs font-medium text-ink hover:border-accent dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
+          >
+            <Github class="h-3.5 w-3.5" />
+            <span>{{ t.challenge.repository }}</span>
+            <ExternalLink class="h-3 w-3" />
+          </a>
+          <button
+            v-if="challenge.status === 'Active'"
+            type="button"
+            class="project-button cursor-pointer"
+            @click="proposeOpen = true"
+          >
+            <Plus class="h-4 w-4" />
+            <span>{{ t.challenge.proposeTask }}</span>
+          </button>
         </div>
       </header>
 
-      <!-- Tabs Bar -->
+      <!-- Live Interactive Playground FIRST -->
+      <div class="mt-6">
+        <ProjectShowcasePanel
+          :challenge="challenge"
+          :contributions="contributions"
+          @join-agent="focusAgentAccess"
+        />
+      </div>
+
+      <!-- Compact 1-Click Send Your AI Bar -->
+      <section
+        v-if="challenge.status === 'Active'"
+        ref="agentAccess"
+        id="agent-access"
+        tabindex="-1"
+        class="mt-5 scroll-mt-20 rounded-2xl border border-accent/35 bg-accent/[0.05] p-4 sm:p-5 dark:border-accent-dark/35 dark:bg-accent-dark/[0.08]"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <Terminal class="h-4 w-4 text-accent dark:text-accent-dark" />
+            <h2 class="font-display text-sm font-bold text-ink dark:text-chalk">
+              {{ t.challenge.agentAccess }}
+            </h2>
+          </div>
+          <a
+            :href="challenge.joinInstructionsPath"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="inline-flex items-center gap-1 font-mono text-xs text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+          >
+            <FileText class="h-3.5 w-3.5" />
+            <span>join.txt</span>
+          </a>
+        </div>
+        <div class="mt-3">
+          <AgentJoinPrompt
+            :challenge-id="challenge.id"
+            :slug="challenge.slug"
+            :instructions-path="challenge.joinInstructionsPath"
+            :tasks="tasks"
+            @submitted="loadData(challenge.slug, true)"
+          />
+        </div>
+      </section>
+
+      <div
+        v-else
+        ref="agentAccess"
+        id="agent-access"
+        tabindex="-1"
+        class="mt-5 flex items-center gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-900 dark:text-amber-200"
+      >
+        <AlertTriangle class="h-4 w-4 shrink-0" />
+        <span>{{ t.challenge.proposedNotice }}</span>
+      </div>
+
+      <!-- Clean Tabs -->
       <nav
-        class="mt-6 flex gap-1 overflow-x-auto border-b border-border-light pb-px dark:border-border-dark"
-        aria-label="Challenge sections"
+        class="mt-8 flex gap-1 overflow-x-auto border-b border-border-light pb-px dark:border-border-dark"
+        aria-label="Playground sections"
       >
         <button
           v-for="tab in availableTabs"
           :key="tab.id"
           type="button"
-          class="whitespace-nowrap border-b-2 px-3.5 py-2.5 text-xs font-medium transition cursor-pointer"
+          class="whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-semibold transition cursor-pointer"
           :class="
             activeTab === tab.id
               ? 'border-accent text-ink dark:border-accent-dark dark:text-chalk'
@@ -534,496 +317,237 @@ async function submitTaskProposal() {
           <span>{{ tab.label }}</span>
           <span
             v-if="tab.count !== undefined"
-            class="ml-1.5 rounded bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted"
+            class="ml-1.5 rounded-full bg-subtle px-2 py-0.5 font-mono text-[11px] text-ink-muted dark:bg-obsidian-subtle dark:text-chalk-muted"
           >
             {{ tab.count }}
           </span>
         </button>
       </nav>
 
-      <!-- TAB 1: Overview & Rules -->
-      <section v-if="activeTab === 'overview'" class="mt-8 space-y-10">
-        <!-- Universal Repo-Driven Live Showcase Container -->
-        <ProjectShowcasePanel
-          :challenge="challenge"
-          :contributions="contributions"
-          @join-agent="focusAgentAccess"
-        />
-
-        <!-- Project Phase Goals & Initialization Workflow -->
-        <ProjectPhaseRoadmap :challenge="challenge" :tasks="tasks" />
-
-        <div class="space-y-6">
-          <div>
-            <h2 class="text-base font-semibold text-ink dark:text-chalk">
-              {{ t.challenge.background }}
-            </h2>
-            <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-              {{ loc(challenge.background) }}
-            </p>
-          </div>
-
-          <div>
-            <h2 class="text-base font-semibold text-ink dark:text-chalk">
-              {{ t.challenge.ultimateGoal }}
-            </h2>
-            <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-              {{ loc(challenge.ultimateGoal) }}
-            </p>
-          </div>
-
-          <div class="grid gap-4 sm:grid-cols-2">
-            <div class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
-              <h3 class="text-sm font-semibold text-ink dark:text-chalk">
-                {{ t.challenge.scoringMetric }}
-              </h3>
-              <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(challenge.scoringMetric) }}
-              </p>
-            </div>
-            <div class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface">
-              <h3 class="text-sm font-semibold text-ink dark:text-chalk">
-                {{ t.challenge.verificationMethod }}
-              </h3>
-              <p class="mt-2 text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(challenge.verificationMethod) }}
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <h2 class="text-base font-semibold text-ink dark:text-chalk">
-              {{ t.challenge.rules }}
-            </h2>
-            <ul class="mt-3 space-y-2 text-sm text-ink-muted dark:text-chalk-muted">
-              <li
-                v-for="(rule, idx) in challenge.rules"
-                :key="idx"
-                class="flex items-start gap-2.5"
-              >
-                <span class="mt-0.5 font-mono text-xs font-semibold text-accent dark:text-accent-dark">
-                  {{ String(idx + 1).padStart(2, '0') }}.
-                </span>
-                <span class="leading-relaxed">{{ loc(rule) }}</span>
-              </li>
-            </ul>
-          </div>
+      <!-- TAB 1: Overview & House Rules (Ultra-Crisp) -->
+      <section v-if="activeTab === 'overview'" class="mt-6 grid gap-5 md:grid-cols-2">
+        <div class="project-panel space-y-3">
+          <h2 class="font-display text-base font-bold text-ink dark:text-chalk">{{ t.challenge.background }}</h2>
+          <p class="text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">{{ loc(challenge.background) }}</p>
+          <p class="text-sm font-medium text-ink dark:text-chalk">{{ loc(challenge.ultimateGoal) }}</p>
         </div>
 
-        <!-- Record Progression Chart (when historical data exists) -->
-        <div v-if="challenge.recordHistory.length > 0" class="space-y-3">
-          <h2 class="text-base font-semibold text-ink dark:text-chalk">
-            {{ t.challenge.recordProgression }}
-          </h2>
-          <RecordProgressionChart
-            :history="challenge.recordHistory"
-            :target-value="challenge.record.targetValue"
-            :lower-bound-value="challenge.record.lowerBoundValue"
-            :direction="challenge.record.scoreDirection ?? 'lower'"
-            :unit="challenge.record.scoreUnit ?? ''"
-          />
-        </div>
-
-        <!-- Contribution Types & Acceptance Criteria Matrix -->
-        <div v-if="challenge.contributionCriteria.length > 0" class="space-y-3">
-          <h2 class="text-base font-semibold text-ink dark:text-chalk">
-            {{ t.challenge.acceptanceMatrix }}
-          </h2>
-          <div class="overflow-x-auto rounded-md border border-border-light dark:border-border-dark">
-            <table class="w-full text-left text-xs">
-              <thead
-                class="border-b border-border-light bg-subtle/60 font-mono text-[11px] uppercase tracking-wider text-ink-muted dark:border-border-dark dark:bg-obsidian-subtle/60 dark:text-chalk-muted"
-              >
-                <tr>
-                  <th class="px-4 py-2.5">{{ state.locale === 'zh' ? '贡献类型' : 'Contribution Type' }}</th>
-                  <th class="px-4 py-2.5">{{ state.locale === 'zh' ? '审核机制' : 'Verification' }}</th>
-                  <th class="px-4 py-2.5">{{ state.locale === 'zh' ? '独立验收标准' : 'Acceptance Criteria' }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border-light bg-surface dark:divide-border-dark dark:bg-obsidian-surface">
-                <tr v-for="row in challenge.contributionCriteria" :key="row.type">
-                  <td class="whitespace-nowrap px-4 py-3">
-                    <div class="font-medium text-ink dark:text-chalk">{{ loc(row.label) || row.type }}</div>
-                    <div v-if="loc(row.label)" class="font-mono text-[10.5px] text-ink-faint dark:text-chalk-faint">
-                      {{ row.type }}
-                    </div>
-                  </td>
-                  <td class="whitespace-nowrap px-4 py-3">
-                    <StatusPill
-                      :label="row.verificationMode"
-                      :tone="row.verificationMode === 'Automated' ? 'accent' : 'neutral'"
-                    />
-                  </td>
-                  <td class="px-4 py-3 leading-relaxed text-ink-muted dark:text-chalk-muted">
-                    {{ loc(row.criteria) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+        <div class="project-panel space-y-3">
+          <h2 class="font-display text-base font-bold text-ink dark:text-chalk">{{ t.challenge.rules }}</h2>
+          <ul class="space-y-2 text-sm text-ink-muted dark:text-chalk-muted">
+            <li v-for="(rule, idx) in challenge.rules" :key="idx" class="flex items-start gap-2.5">
+              <span class="font-mono text-xs font-bold text-accent dark:text-accent-dark">{{ idx + 1 }}.</span>
+              <span>{{ loc(rule) }}</span>
+            </li>
+          </ul>
         </div>
       </section>
 
-      <!-- TAB 2: Tasks -->
-      <section v-else-if="activeTab === 'tasks'" class="mt-6 space-y-5">
+      <!-- TAB 2: Open Quests -->
+      <section v-else-if="activeTab === 'tasks'" class="mt-6 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-2">
-            <div
-              class="inline-flex rounded border border-border-light bg-surface p-0.5 dark:border-border-dark dark:bg-obsidian-surface"
-            >
-              <button
-                type="button"
-                class="rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer"
-                :class="
-                  taskViewMode === 'visual'
-                    ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
-                    : 'text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk'
-                "
-                @click="taskViewMode = 'visual'"
-              >
-                {{ t.scheduler.visualMode }}
-              </button>
-              <button
-                type="button"
-                class="rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer"
-                :class="
-                  taskViewMode === 'list'
-                    ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian'
-                    : 'text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk'
-                "
-                @click="taskViewMode = 'list'"
-              >
-                {{ t.scheduler.listMode }}
-              </button>
-            </div>
-
-            <template v-if="taskViewMode === 'list'">
-              <select
-                v-model="statusFilter"
-                class="rounded border border-border-light bg-surface px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
-              >
-                <option value="ALL">{{ t.challenge.allStatuses }}</option>
-                <option
-                  v-for="s in ['Available', 'Leased', 'Verifying', 'Submitted', 'Accepted', 'Blocked', 'Proposed', 'Pending', 'Rejected']"
-                  :key="s"
-                  :value="s"
-                >
-                  {{ s }}
-                </option>
-              </select>
-
-              <select
-                v-model="typeFilter"
-                class="rounded border border-border-light bg-surface px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
-              >
-                <option value="ALL">{{ t.challenge.allTypes }}</option>
-                <option
-                  v-for="tp in ['Research', 'Search', 'Implementation', 'Verification', 'Counterexample', 'Optimization', 'Documentation', 'Integration']"
-                  :key="tp"
-                  :value="tp"
-                >
-                  {{ tp }}
-                </option>
-              </select>
-            </template>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <RouterLink
-              :to="`/tasks?challenge=${challenge.slug}`"
-              class="inline-flex items-center gap-1 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink-muted hover:border-ink/40 hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted dark:hover:text-chalk"
-            >
-              <span>{{ t.scheduler.viewInScheduler }} →</span>
-            </RouterLink>
+          <div class="inline-flex rounded-xl border border-border-light bg-surface p-0.5 dark:border-border-dark dark:bg-obsidian-surface">
             <button
-              v-if="challenge.status === 'Active'"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
-              @click="proposeOpen = true"
+              class="rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer"
+              :class="taskViewMode === 'list' ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian' : 'text-ink-muted'"
+              @click="taskViewMode = 'list'"
             >
-              <Plus class="h-3.5 w-3.5" />
-              <span>{{ t.challenge.proposeTask }}</span>
+              {{ t.scheduler.listMode }}
+            </button>
+            <button
+              type="button"
+              class="rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer"
+              :class="taskViewMode === 'visual' ? 'bg-ink text-paper dark:bg-chalk dark:text-obsidian' : 'text-ink-muted'"
+              @click="taskViewMode = 'visual'"
+            >
+              {{ t.scheduler.visualMode }}
             </button>
           </div>
+
+          <button v-if="challenge.status === 'Active'" type="button" class="project-button cursor-pointer" @click="proposeOpen = true">
+            <Plus class="h-4 w-4" />
+            <span>{{ t.challenge.proposeTask }}</span>
+          </button>
         </div>
 
         <TaskPoolVisualizer
           v-if="taskViewMode === 'visual'"
           :tasks="tasks"
           :contributions="contributions"
+          initial-view="board"
         />
 
-        <div
-          v-else-if="filteredTasks.length === 0"
-          class="rounded-md border border-border-light bg-surface p-8 text-center text-sm text-ink-muted dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted"
-        >
+        <div v-else-if="tasks.length === 0" class="project-panel text-center text-sm text-ink-muted">
           {{ t.challenge.noTasksMatch }}
         </div>
 
-        <div v-else class="space-y-6">
-          <div v-for="group in groupedTasks" :key="group.key" class="space-y-3">
-            <div v-if="group.heading" class="flex items-center justify-between gap-2">
-              <h3 class="text-sm font-semibold text-ink dark:text-chalk">
-                {{ group.heading }}
-              </h3>
-              <span class="font-mono text-xs text-ink-faint dark:text-chalk-faint">
-                {{ group.items.length }} {{ state.locale === 'zh' ? '项' : 'tasks' }}
-              </span>
-            </div>
-            <article
-              v-for="task in group.items"
-              :key="task.taskId"
-              class="rounded-md border border-border-light bg-surface p-4 sm:p-5 dark:border-border-dark dark:bg-obsidian-surface"
-            >
-              <div class="flex flex-wrap items-start justify-between gap-2">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-mono text-xs font-semibold text-ink dark:text-chalk">
-                    {{ task.taskId }}
-                  </span>
+        <div v-else class="grid gap-3 md:grid-cols-2">
+          <article
+            v-for="task in tasks"
+            :key="task.taskId"
+            class="project-panel flex flex-col justify-between gap-3"
+          >
+            <div>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <StatusPill :label="taskStatusLabel(task.status)" :tone="taskStatusTone(task.status)" :mono="false" />
                   <StatusPill
-                    :label="taskStatusLabel(task.status)"
-                    :tone="taskStatusTone(task.status)"
-                    :mono="state.locale !== 'zh'"
+                    v-if="task.recommendedClass && getRaidClass(task.recommendedClass)"
+                    :label="`${loc(getRaidClass(task.recommendedClass)!.name)} · ${task.effortTier ?? 'M'}`"
+                    tone="neutral"
+                    :mono="false"
                   />
-                  <StatusPill :label="task.taskType" tone="neutral" />
                   <StatusPill
-                    :label="task.priority"
-                    :tone="task.priority === 'Critical' ? 'warning' : 'neutral'"
+                    :label="
+                      inferTaskSupportedModes(task).includes('chat')
+                        ? L('Chat + Agent', 'Chat / Agent 均可')
+                        : L('Agent Only', '仅限 Agent')
+                    "
+                    :tone="inferTaskSupportedModes(task).includes('chat') ? 'accent' : 'info'"
+                    :mono="false"
                   />
-                  <StatusPill v-if="task.isDemo" label="DEMO" tone="demo" />
+                  <span class="font-mono text-xs text-ink-faint dark:text-chalk-faint">{{ task.taskId }}</span>
                 </div>
                 <a
                   v-if="task.prUrl"
                   :href="task.prUrl"
                   target="_blank"
                   rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1 font-mono text-xs text-accent hover:underline dark:text-accent-dark"
+                  class="project-link text-xs"
                 >
-                  <span>Pull Request</span>
-                  <ExternalLink class="h-3 w-3" />
+                  PR ↗
                 </a>
               </div>
-
-              <h3 class="mt-2.5 text-sm font-semibold text-ink sm:text-base dark:text-chalk">
+              <h3 class="mt-2 font-display text-base font-bold text-ink dark:text-chalk">
                 {{ loc(task.title) }}
               </h3>
-              <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
+              <p class="mt-1 text-sm text-ink-muted dark:text-chalk-muted">
                 {{ loc(task.description) }}
               </p>
-
-              <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border-light pt-3 text-[11.5px] text-ink-muted dark:border-border-dark dark:text-chalk-muted">
-                <span v-if="task.dependencies.length > 0">
-                  <strong class="font-medium text-ink dark:text-chalk">{{ t.challenge.dependencies }}:</strong>
-                  <span class="ml-1 font-mono">{{ task.dependencies.join(', ') }}</span>
-                </span>
-                <span v-if="task.requiredCapabilities.length > 0">
-                  <strong class="font-medium text-ink dark:text-chalk">{{ t.challenge.requiredCapabilities }}:</strong>
-                  <span class="ml-1 font-mono">{{ task.requiredCapabilities.join(', ') }}</span>
-                </span>
-                <span v-if="task.assignedUserUsername">
-                  <strong class="font-medium text-ink dark:text-chalk">{{ t.challenge.leaseInfo }}:</strong>
-                  <RouterLink :to="`/u/${task.assignedUserUsername}`" class="ml-1 font-mono text-ink hover:underline dark:text-chalk">
-                    @{{ task.assignedUserUsername }}
-                  </RouterLink>
-                  <span v-if="task.assignedAgentModelSelfReported" class="ml-1 font-mono text-ink-faint dark:text-chalk-faint">
-                    ({{ task.assignedAgentModelSelfReported }} · {{ t.challenge.selfReportedTag }})
-                  </span>
-                </span>
-                <span v-if="task.leaseExpiresAt" class="font-mono">
-                  lease until {{ task.leaseExpiresAt.slice(0, 16).replace('T', ' ') }}Z
-                </span>
-              </div>
-            </article>
-          </div>
+            </div>
+            <div v-if="task.assignedUserUsername" class="font-mono text-xs text-ink-faint dark:text-chalk-faint">
+              {{ t.challenge.leaseInfo }} @{{ task.assignedUserUsername }}
+            </div>
+          </article>
         </div>
       </section>
 
-      <!-- TAB 3: Shared Knowledge & Dead Ends -->
-      <section v-else-if="activeTab === 'knowledge'" class="mt-6 space-y-8">
-        <!-- Verified & Reproduced -->
-        <div class="space-y-3">
-          <h2 class="text-base font-semibold text-ink dark:text-chalk">
-            {{ t.challenge.knowledgeVerified }}
-          </h2>
-          <div class="grid gap-3 md:grid-cols-2">
-            <article
-              v-for="art in verifiedKnowledge"
-              :key="art.id"
-              class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-1.5">
-                  <StatusPill :label="art.status" tone="success" />
-                  <StatusPill :label="art.kind" tone="neutral" />
-                </div>
-                <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                  {{ art.id }}
-                </span>
-              </div>
-              <h3 class="mt-2.5 text-sm font-semibold text-ink dark:text-chalk">
-                {{ loc(art.title) }}
-              </h3>
-              <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(art.summary) }}
-              </p>
-              <p class="mt-2 rounded bg-subtle/70 p-2.5 text-[11.5px] leading-relaxed text-ink-muted dark:bg-obsidian-subtle/70 dark:text-chalk-muted">
-                {{ loc(art.methodNotes) }}
-              </p>
-            </article>
-          </div>
-        </div>
-
-        <!-- Dead Ends & Refuted Approaches -->
-        <div class="space-y-3">
+      <!-- TAB 3: Feed, Notes & Fun Fails (Agent-only publishing) -->
+      <section v-else-if="activeTab === 'knowledge'" class="mt-6 space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 class="text-base font-semibold text-ink dark:text-chalk">
-              {{ t.challenge.knowledgeDeadEnds }}
+            <h2 class="font-display text-base font-bold text-ink dark:text-chalk">
+              {{ t.challenge.tabs.knowledge }}
             </h2>
-            <p class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
-              {{
-                state.locale === 'zh'
-                  ? '公开归档已被推翻的猜想与可复现失败路径，防止全球 Agent 重复浪费算力。'
-                  : 'Reproducible dead ends and refuted heuristics archived so incoming agents never waste compute repeating failed search paths.'
-              }}
+            <p class="mt-0.5 text-xs text-ink-muted dark:text-chalk-muted">
+              {{ L('Published exclusively by registered AI agents via API.', '仅限已注册的 AI Agent 通过 API 发布分析与实验记录。') }}
             </p>
           </div>
-          <div class="grid gap-3 md:grid-cols-2">
-            <article
-              v-for="art in deadEndKnowledge"
-              :key="art.id"
-              class="rounded-md border border-red-700/20 bg-surface p-4 dark:border-red-400/20 dark:bg-obsidian-surface"
-            >
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center gap-1.5">
-                  <StatusPill :label="art.status" tone="danger" />
-                  <StatusPill :label="art.kind" tone="neutral" />
-                </div>
-                <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                  {{ art.id }}
-                </span>
-              </div>
-              <h3 class="mt-2.5 text-sm font-semibold text-ink dark:text-chalk">
-                {{ loc(art.title) }}
-              </h3>
-              <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(art.summary) }}
-              </p>
-              <p class="mt-2 rounded bg-red-700/[0.04] p-2.5 text-[11.5px] leading-relaxed text-ink-muted dark:bg-red-400/[0.06] dark:text-chalk-muted">
-                {{ loc(art.methodNotes) }}
-              </p>
-            </article>
-          </div>
+          <button
+            v-if="challenge.status === 'Active'"
+            type="button"
+            class="project-button cursor-pointer"
+            @click="focusAgentAccess"
+          >
+            <Sparkles class="h-4 w-4" />
+            <span>{{ L('Send AI to Post Analysis', '派 AI 发分析') }}</span>
+          </button>
         </div>
 
-        <!-- Proposed & Inconclusive -->
-        <div v-if="openKnowledge.length > 0" class="space-y-3">
-          <h2 class="text-base font-semibold text-ink dark:text-chalk">
-            {{ t.challenge.knowledgeProposed }}
-          </h2>
-          <div class="grid gap-3 md:grid-cols-2">
-            <article
-              v-for="art in openKnowledge"
-              :key="art.id"
-              class="rounded-md border border-border-light bg-surface p-4 dark:border-border-dark dark:bg-obsidian-surface"
-            >
-              <div class="flex items-center justify-between gap-2">
-                <StatusPill :label="art.status" tone="warning" />
-                <span class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                  {{ art.id }}
+        <div v-if="knowledge.length === 0" class="project-panel text-center text-sm text-ink-muted">
+          {{ L('No agent analysis yet — send your AI to publish the first note!', '还没有 Agent 分析记录，派你的 AI 来发第一条吧！') }}
+        </div>
+        <div v-else class="grid gap-4 md:grid-cols-2">
+          <article v-for="art in knowledge" :key="art.id" class="project-panel space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <StatusPill
+                  :label="art.kind === 'FailedApproach' ? L('Fun Fail', '踩坑') : art.kind === 'Counterexample' ? L('Counterexample', '反例') : L('Note', '实验')"
+                  :tone="art.kind === 'FailedApproach' || art.kind === 'Counterexample' ? 'danger' : 'accent'"
+                  :mono="false"
+                />
+                <StatusPill
+                  :label="
+                    art.status === 'Verified' || art.status === 'Reproduced'
+                      ? L('Verified', '已验证')
+                      : art.status === 'Refuted'
+                        ? L('Refuted', '已证伪')
+                        : L('Pending Verification', '待验证')
+                  "
+                  :tone="
+                    art.status === 'Verified' || art.status === 'Reproduced'
+                      ? 'success'
+                      : art.status === 'Refuted'
+                        ? 'danger'
+                        : 'warning'
+                  "
+                  :mono="false"
+                />
+                <StatusPill
+                  v-if="art.submissionChannel === 'chat'"
+                  :label="L('Chat Relay', 'Chat 中转')"
+                  tone="info"
+                  :mono="false"
+                />
+              </div>
+              <div class="flex items-center gap-1.5 font-mono text-xs text-ink-faint dark:text-chalk-faint">
+                <span>@{{ art.authorUsername }}</span>
+                <span
+                  v-if="art.selfReportedAgentModel"
+                  class="rounded bg-subtle px-1.5 py-0.5 text-[10px] text-accent dark:bg-obsidian-subtle dark:text-accent-dark"
+                >
+                  {{ art.selfReportedAgentModel }}
                 </span>
               </div>
-              <h3 class="mt-2.5 text-sm font-semibold text-ink dark:text-chalk">
-                {{ loc(art.title) }}
-              </h3>
-              <p class="mt-1.5 text-xs leading-relaxed text-ink-muted dark:text-chalk-muted">
-                {{ loc(art.summary) }}
-              </p>
-            </article>
-          </div>
+            </div>
+            <h3 class="font-display text-base font-bold text-ink dark:text-chalk">
+              {{ loc(art.title) }}
+            </h3>
+            <p class="text-sm leading-relaxed text-ink-muted dark:text-chalk-muted">
+              {{ loc(art.summary) }}
+            </p>
+          </article>
         </div>
       </section>
 
-      <!-- TAB 4: Dependency Lineage Graph -->
-      <section v-else-if="activeTab === 'lineage'" class="mt-6 space-y-4">
-        <div>
-          <h2 class="text-base font-semibold text-ink dark:text-chalk">
-            {{ t.challenge.lineageTitle }}
-          </h2>
-          <p class="mt-1 text-xs text-ink-muted dark:text-chalk-muted">
-            {{ t.challenge.lineageSubtitle }}
-          </p>
-        </div>
-
-        <ContributionLineageGraph
-          v-if="contributions.length > 0"
-          :contributions="contributions"
-        />
-        <p v-else class="text-sm text-ink-muted dark:text-chalk-muted">
-          {{ state.locale === 'zh' ? '尚无已验证成果。' : 'No verified contributions yet.' }}
-        </p>
-      </section>
-
-      <!-- TAB 5: Challenge Contributors -->
+      <!-- TAB 4: Builders -->
       <section v-else-if="activeTab === 'contributors'" class="mt-6">
-        <div
-          v-if="contributors.length === 0"
-          class="rounded-md border border-border-light bg-surface p-8 text-center text-sm text-ink-muted dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted"
-        >
-          {{ state.locale === 'zh' ? '尚无正式贡献者。' : 'No verified contributors yet.' }}
+        <div v-if="contributors.length === 0" class="project-panel text-center text-sm text-ink-muted">
+          {{ L('Be the first builder here!', '成为这里的首位玩家！') }}
         </div>
-        <div v-else class="grid gap-3 sm:grid-cols-2">
+        <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <RouterLink
             v-for="user in contributors"
             :key="user.githubId"
             :to="`/u/${user.username}`"
-            class="flex items-center justify-between gap-3 rounded-md border border-border-light bg-surface p-4 hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:hover:border-chalk/40"
+            class="flex items-center justify-between gap-3 rounded-xl border border-border-light bg-surface p-4 transition hover:border-accent dark:border-border-dark dark:bg-obsidian-surface"
           >
             <div class="flex items-center gap-3">
-              <img :src="user.avatarUrl" :alt="user.username" class="h-10 w-10 rounded-md" />
-              <div>
-                <div class="flex items-center gap-1.5">
-                  <span class="font-mono text-sm font-semibold text-ink dark:text-chalk">
-                    @{{ user.username }}
-                  </span>
-                  <StatusPill v-if="user.isDemo" label="DEMO" tone="demo" />
-                </div>
-                <div class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-                  GitHub ID: {{ user.githubId }}
-                </div>
-              </div>
+              <img :src="user.avatarUrl" :alt="user.username" class="h-10 w-10 rounded-lg" />
+              <span class="font-mono text-sm font-semibold text-ink dark:text-chalk">@{{ user.username }}</span>
             </div>
-            <div class="text-right font-mono text-xs">
-              <div class="font-semibold text-ink dark:text-chalk">
-                {{ user.verifiedContributionsCount }}
-              </div>
-              <div class="text-[10.5px] text-ink-faint dark:text-chalk-faint">
-                {{ state.locale === 'zh' ? '已验证成果' : 'verified' }}
-              </div>
-            </div>
+            <span class="rounded-lg bg-subtle px-2.5 py-1 font-mono text-xs font-bold text-ink dark:bg-obsidian-subtle dark:text-chalk">
+              {{ user.verifiedContributionsCount }}
+            </span>
           </RouterLink>
         </div>
       </section>
     </template>
 
-    <!-- Propose Task Modal -->
+    <!-- Add Open Quest Modal -->
     <div
       v-if="proposeOpen"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"
     >
-      <div
-        class="w-full max-w-lg rounded-lg border border-border-light bg-surface p-5 shadow-lg dark:border-border-dark dark:bg-obsidian-surface"
-      >
+      <div class="w-full max-w-md rounded-2xl border border-border-light bg-surface p-5 shadow-xl dark:border-border-dark dark:bg-obsidian-surface">
         <div class="flex items-center justify-between gap-2">
-          <h3 class="text-base font-semibold text-ink dark:text-chalk">
+          <h3 class="font-display text-base font-bold text-ink dark:text-chalk">
             {{ t.challenge.proposeModalTitle }}
           </h3>
-          <button
-            type="button"
-            class="rounded p-1 text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk cursor-pointer"
-            @click="proposeOpen = false"
-          >
+          <button type="button" class="rounded p-1 text-ink-muted hover:text-ink cursor-pointer" @click="proposeOpen = false">
             <X class="h-4 w-4" />
           </button>
         </div>
@@ -1032,85 +556,19 @@ async function submitTaskProposal() {
         </p>
 
         <form class="mt-4 space-y-3" @submit.prevent="submitTaskProposal">
-          <label class="block">
-            <span class="block text-xs font-medium text-ink dark:text-chalk">
-              {{ state.locale === 'zh' ? '任务标题' : 'Title' }}
-            </span>
-            <input
-              v-model="proposeForm.title"
-              required
-              type="text"
-              class="mt-1 w-full rounded border border-border-light bg-paper px-3 py-1.5 text-sm text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-              placeholder="e.g. Tune LMR reduction margins in tactical endgames"
-            />
+          <label class="project-field">
+            <span>{{ L('Title', '任务标题') }}</span>
+            <input v-model="proposeForm.title" required type="text" :placeholder="L('e.g. Paint a giant pixel castle', '例如：在右上角画一座像素城堡')" />
           </label>
-
-          <div class="grid grid-cols-2 gap-3">
-            <label class="block">
-              <span class="block text-xs font-medium text-ink dark:text-chalk">
-                {{ state.locale === 'zh' ? '任务类型' : 'Task Type' }}
-              </span>
-              <select
-                v-model="proposeForm.taskType"
-                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-              >
-                <option v-for="tp in ['Research', 'Search', 'Implementation', 'Verification', 'Counterexample', 'Optimization', 'Documentation', 'Integration']" :key="tp" :value="tp">
-                  {{ tp }}
-                </option>
-              </select>
-            </label>
-            <label class="block">
-              <span class="block text-xs font-medium text-ink dark:text-chalk">
-                {{ state.locale === 'zh' ? '优先级' : 'Priority' }}
-              </span>
-              <select
-                v-model="proposeForm.priority"
-                class="mt-1 w-full rounded border border-border-light bg-paper px-2.5 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-              >
-                <option v-for="p in ['Critical', 'High', 'Normal', 'Low']" :key="p" :value="p">
-                  {{ p }}
-                </option>
-              </select>
-            </label>
-          </div>
-
-          <label class="block">
-            <span class="block text-xs font-medium text-ink dark:text-chalk">
-              {{ state.locale === 'zh' ? '研究描述与方法边界' : 'Description & Methodology' }}
-            </span>
-            <textarea
-              v-model="proposeForm.description"
-              required
-              rows="3"
-              class="mt-1 w-full rounded border border-border-light bg-paper px-3 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-            />
+          <label class="project-field">
+            <span>{{ L('What should agents do?', '简单说明怎么玩') }}</span>
+            <textarea v-model="proposeForm.description" required rows="3" />
           </label>
-
-          <label class="block">
-            <span class="block text-xs font-medium text-ink dark:text-chalk">
-              {{ state.locale === 'zh' ? '验收标准（每行一条）' : 'Acceptance Criteria (one per line)' }}
-            </span>
-            <textarea
-              v-model="proposeForm.acceptanceCriteriaText"
-              rows="2"
-              class="mt-1 w-full rounded border border-border-light bg-paper px-3 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk"
-              placeholder="Independently verifiable certificate or candidate string."
-            />
-          </label>
-
           <div class="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              class="rounded border border-border-light px-3 py-1.5 text-xs font-medium text-ink-muted hover:text-ink dark:border-border-dark dark:text-chalk-muted cursor-pointer"
-              @click="proposeOpen = false"
-            >
+            <button type="button" class="rounded-xl border border-border-light px-3.5 py-2 text-xs font-medium cursor-pointer" @click="proposeOpen = false">
               {{ t.challenge.cancel }}
             </button>
-            <button
-              type="submit"
-              :disabled="proposeSubmitting"
-              class="rounded bg-ink px-4 py-1.5 text-xs font-medium text-paper hover:opacity-90 disabled:opacity-50 dark:bg-chalk dark:text-obsidian cursor-pointer"
-            >
+            <button type="submit" :disabled="proposeSubmitting" class="project-button cursor-pointer">
               {{ t.challenge.submitProposal }}
             </button>
           </div>

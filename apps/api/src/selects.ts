@@ -22,7 +22,10 @@ export const tokens = `SELECT id,name,token_prefix tokenPrefix,scopes_json scope
 
 export const tasks = `SELECT t.task_id taskId,t.challenge_id challengeId,t.title_json titleJson,t.description_json descriptionJson,
   t.task_type taskType,t.priority,t.status,(SELECT json_group_array(depends_on_task_id) FROM task_dependencies WHERE task_id=t.task_id) dependenciesJson,
-  t.required_capabilities_json requiredCapabilitiesJson,t.acceptance_criteria_json acceptanceCriteriaJson,t.input_artifacts_json inputArtifactsJson,
+  t.required_capabilities_json requiredCapabilitiesJson,t.recommended_class recommendedClass,t.effort_tier effortTier,
+  t.supported_modes_json supportedModesJson,t.delivery_mode deliveryMode,t.output_schema_kind outputSchemaKind,
+  t.verification_mode verificationMode,t.trigger_source triggerSource,t.trigger_ref_id triggerRefId,
+  t.acceptance_criteria_json acceptanceCriteriaJson,t.input_artifacts_json inputArtifactsJson,
   t.output_requirements_json outputRequirementsJson,t.assigned_agent_id assignedAgentId,
   a.self_reported_model assignedAgentModelSelfReported,u.username assignedUserUsername,u.avatar_url assignedUserAvatarUrl,
   coalesce(t.proposed_by_github_id,pa.owner_github_id) proposedByGithubId,
@@ -44,7 +47,11 @@ export const tasks = `SELECT t.task_id taskId,t.challenge_id challengeId,t.title
   LEFT JOIN contributions c ON c.task_id=t.task_id LEFT JOIN users cu ON cu.github_id=c.contributor_github_id
   LEFT JOIN credentials cr ON cr.contribution_id=c.id`;
 
-export const challenges = `SELECT c.id,slug,name,status,c.created_at createdAt,domain_json domainJson,tagline_json taglineJson,summary_json summaryJson,
+export const categories = `SELECT cc.id,cc.name_json nameJson,cc.description_json descriptionJson,cc.sort_order sortOrder,
+  (SELECT count(*) FROM challenges ch WHERE ch.category=cc.id) challengesCount,
+  cc.created_at createdAt,cc.updated_at updatedAt FROM challenge_categories cc`;
+
+export const challenges = `SELECT c.id,slug,name,c.category,status,c.created_at createdAt,domain_json domainJson,tagline_json taglineJson,summary_json summaryJson,
   background_json backgroundJson,ultimate_goal_json ultimateGoalJson,record_info_json recordJson,record_history_json recordHistoryJson,
   rules_json rulesJson,scoring_metric_json scoringMetricJson,verification_method_json verificationMethodJson,
   contribution_criteria_json contributionCriteriaJson,c.showcase_json showcaseJson,'https://github.com/'||github_repo_owner||'/'||github_repo_name githubRepo,
@@ -57,8 +64,9 @@ export const challenges = `SELECT c.id,slug,name,status,c.created_at createdAt,d
 
 export const artifacts = `SELECT k.id,k.challenge_id challengeId,k.title_json titleJson,k.kind,k.status,k.summary_json summaryJson,
   k.method_notes_json methodNotesJson,k.limitations_json limitationsJson,k.author_github_id authorGithubId,u.username authorUsername,
-  c.self_reported_agent_model selfReportedAgentModel,p.pr_url prUrl,c.merge_commit_sha commitSha,k.verifier_version verifierVersion,
-  k.parent_artifact_ids_json parentArtifactIdsJson,k.task_id taskId,k.created_at createdAt FROM research_artifacts k
+  coalesce(c.self_reported_agent_model,k.self_reported_model) selfReportedAgentModel,p.pr_url prUrl,c.merge_commit_sha commitSha,k.verifier_version verifierVersion,
+  k.parent_artifact_ids_json parentArtifactIdsJson,k.task_id taskId,k.submission_channel submissionChannel,k.role_class roleClass,
+  k.verified_count verifiedCount,k.refuted_by_artifact_id refutedByArtifactId,k.created_at createdAt FROM research_artifacts k
   JOIN users u ON u.github_id=k.author_github_id LEFT JOIN contributions c ON c.id=k.contribution_id LEFT JOIN pull_requests p ON p.id=c.pull_request_id`;
 
 export const contributions = `SELECT c.id,c.challenge_id challengeId,h.slug challengeSlug,h.name challengeName,c.task_id taskId,

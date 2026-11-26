@@ -10,7 +10,6 @@ import { app, sweep } from '../src/index';
 import { setGitHubRepoFetch } from '../src/github-repos';
 import { catalogStatements } from '../scripts/seed.mjs';
 import { validateProjectBrief } from '@common-intelligence/shared';
-import { AI_CIVILIZATION_BRIEF } from '../../web/src/data/aiCivilization.ts';
 
 const origin = 'http://localhost:8787';
 const sha = '8'.repeat(40),
@@ -288,43 +287,39 @@ afterAll(async () => {
 it('runs the planner, two independent agents, PR proof, honors, dead ends, and dependency unlock end to end', async () => {
   expect((await request('/')).status).toBe(200);
   const catalog = await ok(request('/api/challenges'));
-  expect(catalog.total).toBe(4);
-  expect(catalog.items.map((c) => c.slug).sort()).toEqual(['ai-civilization', 'grandmaster', 'open-game', 'open-language']);
+  expect(catalog.total).toBe(2);
+  expect(catalog.items.map((c) => c.slug).sort()).toEqual(['grandmaster', 'shared-canvas']);
   expect(catalog.items.filter((c) => c.status === 'Active')).toHaveLength(2);
-  for (const brief of Object.values(AI_CIVILIZATION_BRIEF)) {
-    expect(validateProjectBrief(brief)).toHaveProperty('data');
-  }
-  expect(catalog.items.find((c) => c.id === 'ai-civilization')).toMatchObject({
-    name: 'AI 文明模拟', status: 'Active', stats: { openTasksCount: 1 },
-  });
-  const aiInstructions = await (await request('/challenges/ai-civilization/join.txt')).text();
-  expect(aiInstructions).toContain('first planning task');
-  expect(aiInstructions).toContain('Task decomposition rules');
-  const aiTasks = await ok(request('/api/tasks?challengeId=ai-civilization&status=Available'));
-  expect(aiTasks.items[0].isPlanning).toBe(true);
-  expect(aiTasks.items[0].outputRequirements.en).toContain('one independently useful deliverable');
-  expect(catalog.items.find((c) => c.id === 'grandmaster').record.currentBestValue).toBe(1905);
-  expect((await ok(request('/api/challenges/grandmaster/progress'))).tasksByStatus.Available).toBe(2);
-  expect((await ok(request('/api/challenges/grandmaster/progress'))).tasksByStatus.Accepted).toBe(1);
-  const grandmasterInstructions = await (await request('/challenges/grandmaster/join.txt')).text();
-  expect(grandmasterInstructions).toContain('leaseToken');
-  expect(grandmasterInstructions).toContain('Task decomposition rules');
-  const grandmasterTasks = await ok(request('/api/tasks?challengeId=grandmaster&status=Available'));
-  expect(grandmasterTasks.items[0].outputRequirements.en).not.toContain('Task decomposition rules');
-  expect(await (await request('/challenges/grandmaster/join.txt')).text()).toContain('.common-intelligence/showcase.json');
+  expect(
+    validateProjectBrief({
+      schemaVersion: 1,
+      category: 'playground',
+      name: '100-AI Town',
+      domain: 'Multi-Agent Playground',
+      summary: 'A tiny pixel town run by 100 AIs.',
+      goal: 'Agents trade and build streets together.',
+      githubRepo: null,
+    })
+  ).toHaveProperty('data');
 
-  // Verify Live Showcase API, pending empty state on uninitialized projects, and rollback on invalid manifest
+  const grandmasterInstructions = await (await request('/challenges/grandmaster/join.txt')).text();
+  expect(grandmasterInstructions).toContain('/api/agent-join/quickstart');
+  expect(grandmasterInstructions).toContain('/api/chess/grandmaster/vote');
+
+  const canvasInstructions = await (await request('/challenges/shared-canvas/join.txt')).text();
+  expect(canvasInstructions).toContain('/api/canvas/shared-canvas/paint');
+
   const gmShowcase = await ok(request('/api/challenges/grandmaster/showcase'));
-  expect(gmShowcase.showcase).toMatchObject({ kind: 'chess-trainer', status: 'live', version: '0.1.0' });
-  const civShowcase = await ok(request('/api/challenges/ai-civilization/showcase'));
-  expect(civShowcase.showcase.status).toBe('pending');
-  expect(civShowcase.showcase.visualizationGoal.en).toContain('This project is waiting for its first contributor.');
+  expect(gmShowcase.showcase).toMatchObject({ kind: 'chess-trainer', status: 'live' });
+  const canvasShowcase = await ok(request('/api/challenges/shared-canvas/showcase'));
+  expect(canvasShowcase.showcase).toMatchObject({ kind: 'shared-canvas', status: 'live' });
+
   const a = await agent(await login()),
     b = await agent(await login()),
     cid = await challenge();
   const plan = await ok(claim(a, cid));
   const planner = await ok(request('/api/tasks/' + plan.taskId));
-  expect(planner.outputRequirements.zh).toContain('任务拆解规则');
+  expect(planner.outputRequirements.zh).toContain('任务拆解提示');
   const route = '/api/tasks/' + plan.taskId + '/plan';
   const body = {
     agentId: a.id,
@@ -334,13 +329,12 @@ it('runs the planner, two independent agents, PR proof, honors, dead ends, and d
   const idem = { 'Idempotency-Key': randomUUID(), ...a.headers };
   const packet = await ok(request(route, { headers: idem, body }));
   expect(await ok(request(route, { headers: idem, body }))).toEqual(packet);
-  const [tid, other] = packet.taskIds;
-  expect((await claim(b, cid, tid)).status).toBe(409);
-  await ok(approve(tid));
-  await ok(approve(other));
+  expect(packet.status).toBe('Accepted');
+  const [tid] = packet.taskIds;
   expect((await ok(request('/api/tasks/' + plan.taskId))).status).toBe('Accepted');
+  // Tasks with unmet deps auto-enter Pending; tasks without deps auto-enter Available directly!
   const waiting = await ok(prop(b, cid, proposal('Follow-up', [tid])), 201);
-  expect((await ok(approve(waiting.taskId))).status).toBe('Pending');
+  expect(waiting.status).toBe('Pending');
   const leases = await Promise.all([ok(claim(a, cid)), ok(claim(b, cid))]);
   expect(new Set(leases.map((l) => l.taskId)).size).toBe(2);
   const index = leases.findIndex((l) => l.taskId === tid),
@@ -662,7 +656,7 @@ it('keeps project proposals private until a maintainer publishes a claimable cha
     { ...project, schemaVersion: '1' },
     { ...project, goal: undefined },
     { ...project, scoringMetric: 42 },
-    { ...project, acceptanceCriteria: '    ' },
+    { ...project, summary: '    ' },
     { ...project, name: 'x'.repeat(151) },
     { ...project, githubRepo: 'https://github.com/example/..' },
     { ...project, status: 'Approved' },
@@ -698,11 +692,11 @@ it('keeps project proposals private until a maintainer publishes a claimable cha
     status: 'Approved', challengeSlug: slug,
   });
   const catalog = await ok(request('/api/challenges?status=Active'));
-  expect(catalog.items[1]).toMatchObject({ slug, stats: { openTasksCount: 1 } });
+  expect(catalog.items.find((item) => item.slug === slug)).toMatchObject({ slug, stats: { openTasksCount: 1 } });
   expect(await ok(request('/api/challenges/' + slug))).toMatchObject({
     status: 'Active', githubRepo: publish.githubRepo, scoringMetric: text(project.scoringMetric),
   });
-  expect(await (await request('/challenges/' + slug + '/join.txt')).text()).toContain(project.acceptanceCriteria);
+  expect(await (await request('/challenges/' + slug + '/join.txt')).text()).toContain(project.goal);
   const participant = await agent(other);
   const claimed = await ok(claim(participant, slug));
   expect((await ok(request('/api/tasks/' + claimed.taskId))).isPlanning).toBe(true);
@@ -732,7 +726,7 @@ it('keeps project proposals private until a maintainer publishes a claimable cha
 it('authorizes a full Agent session from a project prompt and consumes the code once', async () => {
   const operator = await login();
   const join = '/api/agent-join';
-  const body = { challengeId: 'ai-civilization' };
+  const body = { challengeId: 'shared-canvas' };
   expect((await request(join, { body })).status).toBe(401);
   expect((await request(join, { body, headers: { cookie: operator.headers.cookie } })).status).toBe(403);
   expect((await request(join, { body: { challengeId: 'missing' }, headers: operator.headers })).status).toBe(404);
@@ -743,13 +737,13 @@ it('authorizes a full Agent session from a project prompt and consumes the code 
   const redemptions = await Promise.all([1, 2].map(() => request(join + '/redeem', { body: { code } })));
   expect(redemptions.map((response) => response.status).sort()).toEqual([201, 401]);
   const { plaintextToken, challengeId } = await ok(redemptions.find((response) => response.ok), 201);
-  expect(challengeId).toBe('ai-civilization');
+  expect(challengeId).toBe('shared-canvas');
   const { items } = await ok(request('/api/agent-tokens', { headers: operator.headers }));
   expect(items).toHaveLength(1);
   expect(items[0]).toMatchObject({
     scopes: ['agent:register', 'tasks:read', 'tasks:claim', 'tasks:propose', 'knowledge:read'],
-    maxConcurrentTasks: 1,
-    maxTotalTasks: 5,
+    maxConcurrentTasks: 3,
+    maxTotalTasks: 30,
   });
   const headers = { Authorization: 'Bearer ' + plaintextToken };
   const agent = await ok(request('/api/agents/register', {
@@ -758,7 +752,7 @@ it('authorizes a full Agent session from a project prompt and consumes the code 
   expect(agent.ownerGithubId).toBe(String(operator.uid));
   expect((await request('/api/admin/project-proposals', { headers })).status).toBe(403);
   const claimed = await ok(claim({ id: agent.id, headers }, challengeId));
-  expect(await ok(request('/api/tasks/' + claimed.taskId))).toMatchObject({ isPlanning: true });
+  expect(await ok(request('/api/tasks/' + claimed.taskId))).toMatchObject({ challengeId: 'shared-canvas' });
   await ok(request('/api/agent-tokens/' + items[0].id, { headers: operator.headers, method: 'DELETE' }), 204);
   expect((await request('/api/knowledge', { headers })).status).toBe(401);
 
@@ -767,19 +761,14 @@ it('authorizes a full Agent session from a project prompt and consumes the code 
   expect((await request(join + '/redeem', { body: { code: expired.code } })).status).toBe(401);
 });
 
-it('seeds phased starter task pools and restricts /admin console to allowlisted IPs', async () => {
+it('seeds starter quest pools and restricts /admin console to allowlisted IPs', async () => {
   const gmTasks = await ok(request('/api/tasks?challengeId=grandmaster'));
-  expect(gmTasks.items.map((t) => t.taskId)).toContain('TASK-GM-P1-01');
-  expect(gmTasks.items.map((t) => t.taskId)).toContain('TASK-GM-P1-02');
-  expect(gmTasks.items.find((t) => t.taskId === 'TASK-GM-P1-02').dependencies).toEqual(['TASK-GM-P1-01']);
+  expect(gmTasks.items.map((t) => t.taskId)).toContain('TASK-GM-01');
+  expect(gmTasks.items.map((t) => t.taskId)).toContain('TASK-GM-02');
 
-  const ogTasks = await ok(request('/api/tasks?challengeId=open-game'));
-  expect(ogTasks.items.map((t) => t.taskId)).toContain('TASK-OG-P1-01');
-  expect(ogTasks.items.map((t) => t.taskId)).toContain('TASK-OG-P3-01');
-
-  const olTasks = await ok(request('/api/tasks?challengeId=open-language'));
-  expect(olTasks.items.map((t) => t.taskId)).toContain('TASK-OL-P1-01');
-  expect(olTasks.items.map((t) => t.taskId)).toContain('TASK-OL-P3-02');
+  const canvasTasks = await ok(request('/api/tasks?challengeId=shared-canvas'));
+  expect(canvasTasks.items.map((t) => t.taskId)).toContain('TASK-CANVAS-01');
+  expect(canvasTasks.items.map((t) => t.taskId)).toContain('TASK-CANVAS-03');
 
   const prevAllowlist = env.ADMIN_IP_ALLOWLIST;
   env.ADMIN_IP_ALLOWLIST = '141.11.146.88,240e:38d:8d42:d000::/64';
@@ -796,12 +785,12 @@ it('seeds phased starter task pools and restricts /admin console to allowlisted 
       request('/api/admin/console/overview', { headers: { 'CF-Connecting-IP': '141.11.146.88' } })
     );
     expect(overview.clientIp).toBe('141.11.146.88');
-    expect(overview.summary.challengesTotal).toBeGreaterThanOrEqual(3);
+    expect(overview.summary.challengesTotal).toBeGreaterThanOrEqual(2);
 
     // Cross-origin mutation must be blocked even from an allowlisted IP
     expect(
       (
-        await request('/api/admin/console/tasks/TASK-OG-P1-01/status', {
+        await request('/api/admin/console/tasks/TASK-CANVAS-01/status', {
           method: 'PATCH',
           headers: { 'CF-Connecting-IP': '141.11.146.88', Origin: 'https://evil.example' },
           body: { status: 'Available' },
@@ -811,13 +800,86 @@ it('seeds phased starter task pools and restricts /admin console to allowlisted 
 
     // Same-origin mutation from allowlisted IP succeeds
     const patched = await ok(
-      request('/api/admin/console/tasks/TASK-OG-P1-01/status', {
+      request('/api/admin/console/tasks/TASK-CANVAS-01/status', {
         method: 'PATCH',
         headers: { 'CF-Connecting-IP': '141.11.146.88', Origin: origin },
         body: { status: 'Available' },
       })
     );
-    expect(patched).toMatchObject({ taskId: 'TASK-OG-P1-01', status: 'Available' });
+    expect(patched).toMatchObject({ taskId: 'TASK-CANVAS-01', status: 'Available' });
+
+    // Default categories: grandmaster -> challenge, shared-canvas -> playground
+    const cats = await ok(request('/api/categories'));
+    expect(cats.items.map((c) => c.id)).toEqual(['challenge', 'playground']);
+    const challengeList = await ok(request('/api/challenges?category=challenge'));
+    expect(challengeList.items.some((c) => c.slug === 'grandmaster')).toBe(true);
+    expect(challengeList.items.some((c) => c.slug === 'shared-canvas')).toBe(false);
+    const playgroundList = await ok(request('/api/challenges?category=playground'));
+    expect(playgroundList.items.some((c) => c.slug === 'shared-canvas')).toBe(true);
+    expect(playgroundList.items.some((c) => c.slug === 'grandmaster')).toBe(false);
+
+    // Admin can create a new category, edit it, reassign a project, and delete once unused
+    const adminMutationHeaders = { 'CF-Connecting-IP': '141.11.146.88', Origin: origin };
+    const createdCat = await ok(
+      request('/api/admin/console/categories', {
+        method: 'POST',
+        headers: adminMutationHeaders,
+        body: {
+          id: 'simulation',
+          nameZh: '模拟实验',
+          nameEn: 'Simulation Lab',
+          descriptionZh: '多智能体模拟实验',
+          descriptionEn: 'Multi-agent simulation experiments',
+          sortOrder: 3,
+        },
+      }),
+      201
+    );
+    expect(createdCat).toMatchObject({ id: 'simulation', sortOrder: 3, challengesCount: 0 });
+
+    const editedCat = await ok(
+      request('/api/admin/console/categories/simulation', {
+        method: 'PATCH',
+        headers: adminMutationHeaders,
+        body: { nameZh: '模拟沙盒', sortOrder: 5 },
+      })
+    );
+    expect(editedCat).toMatchObject({ id: 'simulation', sortOrder: 5, name: { en: 'Simulation Lab', zh: '模拟沙盒' } });
+
+    const moved = await ok(
+      request('/api/admin/console/challenges/shared-canvas/category', {
+        method: 'PATCH',
+        headers: adminMutationHeaders,
+        body: { category: 'simulation' },
+      })
+    );
+    expect(moved).toMatchObject({ slug: 'shared-canvas', category: 'simulation' });
+
+    // Cannot delete category while assigned to a project
+    expect(
+      (
+        await request('/api/admin/console/categories/simulation', {
+          method: 'DELETE',
+          headers: adminMutationHeaders,
+        })
+      ).status
+    ).toBe(409);
+
+    // Reassign back to playground, then delete the temporary category
+    await ok(
+      request('/api/admin/console/challenges/shared-canvas/category', {
+        method: 'PATCH',
+        headers: adminMutationHeaders,
+        body: { category: 'playground' },
+      })
+    );
+    const deletedCat = await ok(
+      request('/api/admin/console/categories/simulation', {
+        method: 'DELETE',
+        headers: adminMutationHeaders,
+      })
+    );
+    expect(deletedCat).toEqual({ id: 'simulation', deleted: true });
   } finally {
     env.ADMIN_IP_ALLOWLIST = prevAllowlist;
   }
@@ -1014,11 +1076,9 @@ it('automates public GitHub repo creation, ownership notice, webhook setup, batc
       })
     );
     expect(batch.org).toBe('common-intelligence-org');
-    expect(batch.created).toBeGreaterThanOrEqual(4);
+    expect(batch.created).toBeGreaterThanOrEqual(2);
     expect(repos.has('common-intelligence-org/grandmaster')).toBe(true);
-    expect(repos.has('common-intelligence-org/ai-civilization')).toBe(true);
-    expect(repos.has('common-intelligence-org/open-game')).toBe(true);
-    expect(repos.has('common-intelligence-org/open-language')).toBe(true);
+    expect(repos.has('common-intelligence-org/shared-canvas')).toBe(true);
 
     // 3. Delete the uncontributed auto-managed challenge AND automatically delete its GitHub repo
     const deleted = await ok(
@@ -1121,14 +1181,13 @@ it('hides agent machine labels from public tasks, activity, and agent lookup end
   expect(JSON.stringify(activityList.items)).not.toContain('Bleap-Pro');
 });
 
-it('auto-schedules bounded routine review and knowledge tasks when no primary tasks are available', async () => {
+it('auto-schedules bounded wildcard quests when no primary tasks are available', async () => {
   const cid = await challenge();
   const a1 = await agent(await login());
   const a2 = await agent(await login());
   const a3 = await agent(await login());
 
-  // Claim the planning task and submit two proposals: approve one into Verifying, leave one Proposed
-  // so needed_plans cannot create another planning seed and primary Available count drops to 0.
+  // Claim the planning task and submit two quests (they open directly into Available!)
   const planLease = await ok(claim(a1, cid));
   const planned = await ok(
     request('/api/tasks/' + planLease.taskId + '/plan', {
@@ -1136,64 +1195,440 @@ it('auto-schedules bounded routine review and knowledge tasks when no primary ta
       body: {
         agentId: a1.id,
         leaseToken: planLease.leaseToken,
-        tasks: [proposal('Primary implementation'), proposal('Pending review idea')],
+        tasks: [proposal('Primary quest 1'), proposal('Primary quest 2')],
       },
     })
   );
-  const [primaryTid] = planned.taskIds;
-  await ok(approve(primaryTid));
-  const primaryLease = await ok(claim(a1, cid, primaryTid));
-  await ok(
-    request('/api/tasks/' + primaryTid + '/submit', {
-      headers: a1.headers,
-      body: {
-        agentId: a1.id,
-        leaseToken: primaryLease.leaseToken,
-        headSha: sha,
-        prUrl: 'https://github.com/example/' + cid + '/pull/11',
-        summary: 'Awaiting maintainer review',
-      },
-    })
-  );
+  const [t1, t2] = planned.taskIds;
+  // Claim both primary quests so primary Available count drops to 0 and a planning seed is blocked by an open plan/proposed or we claim it
+  const l1 = await ok(claim(a1, cid, t1));
+  await ok(claim(a2, cid, t2));
+  // Claim any auto-replenished planning task too so Available count is 0
+  const maybePlan = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
+  if (maybePlan.items.length > 0 && maybePlan.items[0].isPlanning) {
+    await ok(claim(a3, cid, maybePlan.items[0].taskId));
+  }
 
-  // 1. With 0 Available primary tasks and a Submitted PR, GET /api/tasks schedules MAINT-REVIEW-*
+  // 1. With 0 Available primary tasks, GET /api/tasks schedules QUEST-EXPERIMENT-*
   const firstPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
   expect(firstPool.items).toHaveLength(1);
-  expect(firstPool.items[0].taskId).toMatch(/^MAINT-REVIEW-/);
-  expect(firstPool.items[0].taskType).toBe('Verification');
+  expect(firstPool.items[0].taskId).toMatch(/^QUEST-EXPERIMENT-/);
   expect(firstPool.items[0].priority).toBe('Low');
 
-  // Repeated GET does not duplicate standing tasks while one is already Available
-  const repeatedPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
-  expect(repeatedPool.items).toHaveLength(1);
-  expect(repeatedPool.items[0].taskId).toBe(firstPool.items[0].taskId);
-
-  // 2. After Agent 1 claims MAINT-REVIEW-*, Agent 2 receives rotated MAINT-KNOWLEDGE-*
-  const reviewLease = await ok(claim(a1, cid));
-  expect(reviewLease.taskId).toBe(firstPool.items[0].taskId);
+  // 2. Claiming QUEST-EXPERIMENT-* rotates to QUEST-PLAYTEST-*
+  const expLease = await ok(claim(a1, cid));
+  expect(expLease.taskId).toBe(firstPool.items[0].taskId);
 
   const secondPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
   expect(secondPool.items).toHaveLength(1);
-  expect(secondPool.items[0].taskId).toMatch(/^MAINT-KNOWLEDGE-/);
-  expect(secondPool.items[0].taskType).toBe('Documentation');
+  expect(secondPool.items[0].taskId).toMatch(/^QUEST-PLAYTEST-/);
 
-  // 3. After Agent 2 claims MAINT-KNOWLEDGE-*, concurrent standing task cap (2) prevents flooding
-  const knowledgeLease = await ok(claim(a2, cid));
-  expect(knowledgeLease.taskId).toBe(secondPool.items[0].taskId);
-
-  const cappedPool = await ok(request('/api/tasks?challengeId=' + cid + '&status=Available'));
-  expect(cappedPool.items).toHaveLength(0);
-  expect((await claim(a3, cid)).status).toBe(409);
-
-  // 4. Releasing a standing task frees a slot; approving the Proposed primary task still takes priority
+  // 3. Releasing a primary task puts it back in front of wildcard quests
   await ok(
-    request('/api/tasks/' + knowledgeLease.taskId + '/release', {
-      headers: a2.headers,
-      body: { agentId: a2.id, leaseToken: knowledgeLease.leaseToken, reason: 'handing off' },
+    request('/api/tasks/' + t1 + '/release', {
+      headers: a1.headers,
+      body: { agentId: a1.id, leaseToken: l1.leaseToken, reason: 'handing off' },
     })
   );
-  const [, secondProposalTid] = planned.taskIds;
-  await ok(approve(secondProposalTid));
   const nextClaim = await ok(claim(a3, cid));
-  expect(nextClaim.taskId).toBe(secondProposalTid);
+  expect(nextClaim.taskId).toBe(t1);
 }, 20000);
+
+it('supports 1-step agent quickstart, 1,000-AI shared canvas painting, collective vote chess vs Stockfish 19, and quick notes', async () => {
+  const player1 = await login();
+  const player2 = await login();
+
+  // 1. Quickstart for Shared Canvas: 1 call redeems code + mints 7-day token + registers agent
+  const canvasCode = await ok(
+    request('/api/agent-join', { headers: player1.headers, body: { challengeId: 'shared-canvas' } }),
+    201
+  );
+  const qsCanvas = await ok(
+    request('/api/agent-join/quickstart', {
+      body: { code: canvasCode.code, label: 'pixel-bot', selfReportedModel: 'claude-sonnet-4.5' },
+    }),
+    201
+  );
+  expect(qsCanvas.plaintextToken).toMatch(/^ci_agt_/);
+  expect(qsCanvas.agentId).toMatch(/^agt_/);
+  expect(qsCanvas.maxConcurrentTasks).toBe(3);
+  expect(qsCanvas.maxTotalTasks).toBe(30);
+  expect(qsCanvas.nextSteps.canvasEndpoint).toBe('/api/canvas/shared-canvas/paint');
+
+  // 2. Paint pixels directly via Agent Bearer token
+  const painted = await ok(
+    request('/api/canvas/shared-canvas/paint', {
+      headers: { Authorization: 'Bearer ' + qsCanvas.plaintextToken },
+      body: {
+        agentId: qsCanvas.agentId,
+        pixels: [
+          { x: 5, y: 5, color: '#10b981' },
+          { x: 6, y: 5, color: '#6366f1' },
+        ],
+        note: 'First AI pixels!',
+      },
+    }),
+    201
+  );
+  expect(painted.paintedCount).toBe(2);
+  const canvasState = await ok(request('/api/canvas/shared-canvas'));
+  expect(canvasState.stats.paintedPixels).toBeGreaterThanOrEqual(2);
+  expect(canvasState.stats.uniqueAgents).toBeGreaterThanOrEqual(1);
+  expect(canvasState.recentStrokes[0].note).toBe('First AI pixels!');
+
+  // 3. Quickstart for Collective Vote Chess vs Stockfish 19 (Agent-only voting & analysis)
+  const chessCode1 = await ok(
+    request('/api/agent-join', { headers: player1.headers, body: { challengeId: 'grandmaster' } }),
+    201
+  );
+  const qsChess1 = await ok(
+    request('/api/agent-join/quickstart', {
+      body: { code: chessCode1.code, label: 'tactic-bot-1', selfReportedModel: 'gemini-2.5-pro' },
+    }),
+    201
+  );
+  expect(qsChess1.nextSteps.chessEndpoint).toBe('/api/chess/grandmaster/vote');
+
+  const chessCode2 = await ok(
+    request('/api/agent-join', { headers: player2.headers, body: { challengeId: 'grandmaster' } }),
+    201
+  );
+  const qsChess2 = await ok(
+    request('/api/agent-join/quickstart', {
+      body: { code: chessCode2.code, label: 'tactic-bot-2', selfReportedModel: 'claude-sonnet-4.5' },
+    }),
+    201
+  );
+
+  const chessCode3 = await ok(
+    request('/api/agent-join', { headers: player1.headers, body: { challengeId: 'grandmaster' } }),
+    201
+  );
+  const qsChess3 = await ok(
+    request('/api/agent-join/quickstart', {
+      body: { code: chessCode3.code, label: 'tactic-bot-3', selfReportedModel: 'codex-gpt-5' },
+    }),
+    201
+  );
+
+  // Unregistered agent token must also be rejected
+  const unregisteredToken = await ok(
+    request('/api/agent-tokens', {
+      headers: player1.headers,
+      body: { name: 'unregistered-bot', expiresInDays: 1 },
+    }),
+    201
+  );
+
+  // Human browser sessions and unregistered tokens cannot vote or post analysis
+  expect(
+    (
+      await request('/api/chess/grandmaster/vote', {
+        headers: player1.headers,
+        body: { move: 'e4', reason: 'Manual human attempt' },
+      })
+    ).status
+  ).toBe(403);
+  expect(
+    (
+      await request('/api/chess/grandmaster/vote', {
+        headers: { Authorization: 'Bearer ' + unregisteredToken.plaintextToken },
+        body: { move: 'e4' },
+      })
+    ).status
+  ).toBe(403);
+  expect(
+    (
+      await request('/api/challenges/grandmaster/notes', {
+        headers: player1.headers,
+        body: { title: 'Manual note', summary: 'Should be rejected for human browser sessions.' },
+      })
+    ).status
+  ).toBe(403);
+  expect(
+    (
+      await request('/api/challenges/grandmaster/notes', {
+        headers: { Authorization: 'Bearer ' + unregisteredToken.plaintextToken },
+        body: { title: 'Unregistered note', summary: 'Should require a registered agent.' },
+      })
+    ).status
+  ).toBe(403);
+
+  const initialMatch = await ok(request('/api/chess/grandmaster'));
+  expect(initialMatch.roundNumber).toBe(1);
+  expect(initialMatch.legalMoves.length).toBe(20);
+
+  // Two agents back e4, one backs d4 -> e4 must win!
+  await ok(
+    request('/api/chess/grandmaster/vote', {
+      headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+      body: { agentId: qsChess1.agentId, move: 'e4', reason: 'Best by test!' },
+    }),
+    201
+  );
+  await ok(
+    request('/api/chess/grandmaster/vote', {
+      headers: { Authorization: 'Bearer ' + qsChess2.plaintextToken },
+      body: { move: 'e2e4', reason: 'Agree with e4!' },
+    }),
+    201
+  );
+  await ok(
+    request('/api/chess/grandmaster/vote', {
+      headers: { Authorization: 'Bearer ' + qsChess3.plaintextToken },
+      body: { agentId: qsChess3.agentId, move: 'd4', reason: 'Queen pawn game' },
+    }),
+    201
+  );
+
+  // Illegal move from an agent is rejected cleanly
+  expect(
+    (
+      await request('/api/chess/grandmaster/vote', {
+        headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+        body: { agentId: qsChess1.agentId, move: 'e2e5' },
+      })
+    ).status
+  ).toBe(400);
+
+  const beforeResolve = await ok(request('/api/chess/grandmaster'));
+  expect(beforeResolve.tallies[0]).toMatchObject({ moveUci: 'e2e4', moveSan: 'e4', votes: 2 });
+
+  // Resolve round: e4 plays, Stockfish replies, match advances to Round 2!
+  const resolved = await ok(
+    request('/api/chess/grandmaster/resolve', {
+      headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+      body: {},
+    })
+  );
+  expect(resolved.collectiveMove.san).toBe('e4');
+  expect(resolved.stockfishReply).toBeTruthy();
+  expect(resolved.match.roundNumber).toBe(2);
+  expect(resolved.match.moveHistory).toHaveLength(2);
+  expect(resolved.match.specialActions?.some((m) => m.uci === 'resign')).toBe(true);
+
+  // Round 2: AI Swarm votes to resign ("resign" / "投降") -> resolving ends game cleanly as 0-1 without Stockfish reply
+  await ok(
+    request('/api/chess/grandmaster/vote', {
+      headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+      body: { agentId: qsChess1.agentId, move: 'resign', reason: 'Position lost — save time and start Game 2!' },
+    }),
+    201
+  );
+  await ok(
+    request('/api/chess/grandmaster/vote', {
+      headers: { Authorization: 'Bearer ' + qsChess2.plaintextToken },
+      body: { agentId: qsChess2.agentId, move: '投降', reason: 'Agreed, let us reset.' },
+    }),
+    201
+  );
+  const resigned = await ok(
+    request('/api/chess/grandmaster/resolve', {
+      headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+      body: {},
+    })
+  );
+  expect(resigned.collectiveMove.uci).toBe('resign');
+  expect(resigned.collectiveMove.san).toBe('Resign');
+  expect(resigned.stockfishReply).toBeNull();
+  expect(resigned.match.status).toBe('finished');
+  expect(resigned.match.result).toBe('0-1');
+
+  // Start next game so subsequent tests see an active game cleanly
+  const nextGame = await ok(
+    request('/api/chess/grandmaster/new-game', {
+      headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+      body: {},
+    }),
+    201
+  );
+  expect(nextGame.gameNumber).toBe(2);
+  expect(nextGame.status).toBe('playing');
+
+  // 4. Lightweight agent-only analysis note without needing a PR
+  const note = await ok(
+    request('/api/challenges/grandmaster/notes', {
+      headers: { Authorization: 'Bearer ' + qsChess1.plaintextToken },
+      body: { title: 'Round 1 recap', summary: 'e4 won 2-1 and Stockfish replied cleanly!' },
+    }),
+    201
+  );
+  expect(note.title.en).toBe('Round 1 recap');
+}, 25000);
+
+it('allows /api/agent-join and quickstart without TOKEN_PEPPER in local dev bypass mode, but rejects missing TOKEN_PEPPER in production', async () => {
+  const prevBypass = env.LOCAL_DEV_AUTH_BYPASS;
+  const prevPepper = env.TOKEN_PEPPER;
+  const prevOrigin = env.APP_ORIGIN;
+  try {
+    // 1. Local dev bypass on localhost without TOKEN_PEPPER succeeds
+    env.LOCAL_DEV_AUTH_BYPASS = 'true';
+    env.APP_ORIGIN = 'http://localhost:8787';
+    env.TOKEN_PEPPER = '';
+
+    const localJoin = await ok(
+      request('/api/agent-join', {
+        headers: { Origin: 'http://localhost:8787' },
+        body: { challengeId: 'grandmaster' },
+      }),
+      201
+    );
+    expect(localJoin.code).toMatch(/^ci_join_/);
+
+    const localQs = await ok(
+      request('/api/agent-join/quickstart', {
+        body: { code: localJoin.code, label: 'local-bot' },
+      }),
+      201
+    );
+    expect(localQs.plaintextToken).toMatch(/^ci_agt_/);
+
+    // 2. Non-local / non-bypass without TOKEN_PEPPER strictly fails with 503
+    env.LOCAL_DEV_AUTH_BYPASS = 'false';
+    const prodRes = await request('/api/agent-join/quickstart', {
+      body: { code: localJoin.code, label: 'prod-bot' },
+    });
+    expect(prodRes.status).toBe(503);
+  } finally {
+    env.LOCAL_DEV_AUTH_BYPASS = prevBypass;
+    env.TOKEN_PEPPER = prevPepper;
+    env.APP_ORIGIN = prevOrigin;
+  }
+}, 15000);
+
+it('supports dual-mode Chat relay restricted to entry classes, deduplication, auto Agent follow-up tasks, and independent verification', async () => {
+  const author = await login();
+  const verifier1 = await login();
+  const verifier2 = await login();
+  const agVerifier = await agent(verifier2);
+
+  // 1. Advanced execution classes (forger / tactician / pioneer) are blocked in Chat mode
+  const blockedClass = await request('/api/challenges/grandmaster/context-pack?classId=forger');
+  expect(blockedClass.status).toBe(403);
+
+  // Agent-only task is also blocked in Chat context-pack
+  const blockedTask = await request('/api/challenges/grandmaster/context-pack?classId=scout&taskId=TASK-GM-03');
+  expect(blockedTask.status).toBe(403);
+
+  // 2. Entry-tier Scout context pack succeeds and returns a bounded self-contained prompt
+  const pack = await ok(
+    request('/api/challenges/grandmaster/context-pack?classId=scout&budgetTier=S&taskId=TASK-GM-02')
+  );
+  expect(pack.classId).toBe('scout');
+  expect(pack.prompt).toContain('Common Intelligence');
+  expect(pack.prompt).toContain('NEVER claim you executed code');
+  expect(pack.promptCharCount).toBeLessThanOrEqual(11500);
+
+  // 3. Submitting with an advanced class via Chat fails with 403
+  const badClassSubmit = await request('/api/challenges/grandmaster/chat-submit', {
+    headers: author.headers,
+    body: {
+      classId: 'forger',
+      outputSchemaKind: 'failure_analysis',
+      rawResponse: '{}',
+    },
+  });
+  expect(badClassSubmit.status).toBe(403);
+
+  // 4. Valid Scout failure analysis wrapped in prose + forbidden self-eval keys is sanitized, marked Proposed, and spawns an Agent follow-up task
+  const replyPayload = `Sure! Here is the root cause:\n\`\`\`json\n${JSON.stringify({
+    schemaVersion: 1,
+    kind: 'failure_analysis',
+    title: 'Quiescence search misses discovered checks on king rank',
+    rootCause: 'Stand-pat pruning returns early when tactical discovered checks are still pending in the node.',
+    evidenceSummary: 'Observed recurring tactical losses in shallow depth horizons during move ordering analysis.',
+    suggestedDirection: 'Extend quiescence search by 1 ply for checking moves before applying stand-pat cutoff.',
+    verified: true,
+    measuredElo: 3800,
+    selfReportedModel: 'claude-web',
+  })}\n\`\`\``;
+
+  const submitted = await ok(
+    request('/api/challenges/grandmaster/chat-submit', {
+      headers: author.headers,
+      body: {
+        classId: 'scout',
+        taskId: 'TASK-GM-02',
+        outputSchemaKind: 'failure_analysis',
+        rawResponse: replyPayload,
+      },
+    }),
+    201
+  );
+  expect(submitted.outcomeType).toBe('artifact_pending_verification');
+  expect(submitted.artifact.status).toBe('Proposed');
+  expect(submitted.artifact.submissionChannel).toBe('chat');
+  expect(submitted.warnings.some((w) => w.includes('Stripped unverified self-evaluation'))).toBe(true);
+  expect(submitted.followUpTask).toBeTruthy();
+  expect(submitted.followUpTask.supportedModes).toEqual(['agent']);
+
+  // 5. Duplicate submission is rejected with 409 CONFLICT
+  const dup = await request('/api/challenges/grandmaster/chat-submit', {
+    headers: verifier1.headers,
+    body: {
+      classId: 'scout',
+      outputSchemaKind: 'failure_analysis',
+      rawResponse: replyPayload,
+    },
+  });
+  expect(dup.status).toBe(409);
+
+  // 6. Agent brief surfaces pending Chat artifact & spawned follow-up task for cross-mode handoff
+  const brief = await ok(request('/api/challenges/grandmaster/brief?class=forger&budget=M'));
+  expect(brief.pendingChatArtifacts.some((a) => a.id === submitted.artifact.id)).toBe(true);
+
+  // 7. Strict anti-self-verification: author cannot verify own Chat artifact
+  const selfVerify = await request(`/api/artifacts/${submitted.artifact.id}/verify`, {
+    headers: author.headers,
+    body: { verdict: 'confirm', evidenceSummary: 'Trying to approve my own artifact.' },
+  });
+  expect(selfVerify.status).toBe(403);
+
+  // Two distinct independent verifiers promote Proposed -> Verified
+  const v1 = await ok(
+    request(`/api/artifacts/${submitted.artifact.id}/verify`, {
+      headers: verifier1.headers,
+      body: { verdict: 'confirm', evidenceSummary: 'Independently checked qsearch source and confirmed check omission.' },
+    })
+  );
+  expect(v1.artifactStatus).toBe('Proposed');
+  expect(v1.confirmCount).toBe(1);
+
+  const v2 = await ok(
+    request(`/api/artifacts/${submitted.artifact.id}/verify`, {
+      headers: agVerifier.headers,
+      body: {
+        verdict: 'confirm',
+        agentId: agVerifier.id,
+        evidenceSummary: 'Reproduced tactical horizon drop on 3 test positions with local engine run.',
+      },
+    })
+  );
+  expect(v2.artifactStatus).toBe('Verified');
+  expect(v2.confirmCount).toBe(2);
+
+  // 8. Playground deterministic Chat submission paints directly onto shared-canvas
+  const canvasPaint = await ok(
+    request('/api/challenges/shared-canvas/chat-submit', {
+      headers: author.headers,
+      body: {
+        classId: 'scout',
+        taskId: 'TASK-CANVAS-01',
+        outputSchemaKind: 'canvas_pixels',
+        rawResponse: JSON.stringify({
+          schemaVersion: 1,
+          kind: 'canvas_pixels',
+          pixels: [
+            { x: 3, y: 4, color: '#10b981' },
+            { x: 4, y: 4, color: '#34d399' },
+          ],
+          note: 'Chat-relayed emerald star!',
+          selfReportedModel: 'gemini-web',
+        }),
+      },
+    }),
+    201
+  );
+  expect(canvasPaint.outcomeType).toBe('playground_applied');
+  expect(canvasPaint.playgroundResult.paintedCount).toBe(2);
+}, 25000);

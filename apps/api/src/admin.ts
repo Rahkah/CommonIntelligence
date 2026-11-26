@@ -8,7 +8,8 @@ import {
   provisionChallengeRepository,
 } from './github-repos';
 import { siteTrafficOverview } from './traffic';
-import { challenges, tasks } from './selects';
+import { categories, challenges, tasks } from './selects';
+import { categoryId } from './challenge-write';
 import {
   type App,
   type Ctx,
@@ -145,7 +146,10 @@ function assertAdminIp(c: Ctx, mutation = false): { ip: string; allowlist: strin
         fail(403, 'FORBIDDEN', 'Invalid request origin.');
       }
     }
-    if (origin !== c.env.APP_ORIGIN) {
+    const originMatches =
+      origin === c.env.APP_ORIGIN ||
+      (isLocalOrigin(c.env.APP_ORIGIN) && Boolean(origin) && isLocalOrigin(origin!));
+    if (!originMatches) {
       fail(403, 'FORBIDDEN', 'Cross-origin admin mutations are blocked.');
     }
   }
@@ -174,10 +178,11 @@ adminConsole.get('/api/admin/console/traffic', async (c) => {
 adminConsole.get('/api/admin/console/overview', async (c) => {
   const { ip, allowlist } = assertAdminIp(c, false);
   const db = c.env.DB;
-  const [challengeRows, taskRows, userRows, proposalRows, countRow] = await db.batch<
+  const [challengeRows, categoryRows, taskRows, userRows, proposalRows, countRow] = await db.batch<
     Record<string, unknown>
   >([
     sql(db, challenges + ' ORDER BY CASE status WHEN \'Active\' THEN 0 ELSE 1 END, createdAt ASC, slug ASC'),
+    sql(db, categories + ' ORDER BY sortOrder ASC, createdAt ASC, id ASC'),
     sql(db, tasks + ' ORDER BY challengeId ASC, taskId ASC LIMIT 200'),
     sql(
       db,
@@ -199,6 +204,7 @@ adminConsole.get('/api/admin/console/overview', async (c) => {
   ]);
 
   const challengeList = challengeRows.results.map((r) => unpack<Record<string, unknown>>(r));
+  const categoryList = categoryRows.results.map((r) => unpack<Record<string, unknown>>(r));
   const taskList = taskRows.results.map((r) => unpack<Record<string, unknown>>(r));
   const userList = userRows.results;
   const proposalList = proposalRows.results.map((row) => {
@@ -226,6 +232,7 @@ adminConsole.get('/api/admin/console/overview', async (c) => {
     summary: {
       challengesTotal: challengeList.length,
       activeChallenges: challengeList.filter((ch) => ch.status === 'Active').length,
+      categoriesTotal: categoryList.length,
       tasksTotal: taskList.length,
       availableTasks: taskList.filter((t) => t.status === 'Available').length,
       pendingTasks: taskList.filter((t) => t.status === 'Pending').length,
@@ -236,6 +243,7 @@ adminConsole.get('/api/admin/console/overview', async (c) => {
       agentsTotal: Number(countRow.results[0].agentsTotal),
       pendingProposals: proposalList.filter((p) => p.status === 'Pending').length,
     },
+    categories: categoryList,
     challenges: challengeList,
     tasks: taskList,
     users: userList,
@@ -259,6 +267,128 @@ adminConsole.patch('/api/admin/console/challenges/:id/status', async (c) => {
   ).first();
   if (!updated) fail(404, 'NOT_FOUND');
   return c.json(updated);
+});
+
+adminConsole.patch('/api/admin/console/challenges/:id/category', async (c) => {
+  assertAdminIp(c, true);
+  const cid = key.parse(c.req.param('id'));
+  const body = await json(c, z.object({ category: categoryId }).strict());
+  const cat = await sql(
+    c.env.DB,
+    'SELECT id FROM challenge_categories WHERE id=?',
+    body.category
+  ).first<{ id: string }>();
+  if (!cat) fail(404, 'NOT_FOUND', 'Category not found.');
+  const updated = await sql(
+    c.env.DB,
+    `UPDATE challenges SET category=?, updated_at=${now} WHERE id=? OR slug=? RETURNING id, slug, category`,
+    cat.id,
+    cid,
+    cid
+  ).first();
+  if (!updated) fail(404, 'NOT_FOUND', 'Challenge not found.');
+  return c.json(updated);
+});
+
+adminConsole.post('/api/admin/console/categories', async (c) => {
+  assertAdminIp(c, true);
+  const body = await json(
+    c,
+    z
+      .object({
+        id: categoryId,
+        nameZh: field(80),
+        nameEn: field(80),
+        descriptionZh: z.string().trim().max(400).optional(),
+        descriptionEn: z.string().trim().max(400).optional(),
+        sortOrder: z.number().int().min(0).max(9999).default(100),
+      })
+      .strict()
+  );
+  const exists = await sql(
+    c.env.DB,
+    'SELECT id FROM challenge_categories WHERE id=?',
+    body.id
+  ).first();
+  if (exists) fail(409, 'CONFLICT', 'A category with this id already exists.');
+
+  const nameJson = JSON.stringify({ en: body.nameEn, zh: body.nameZh });
+  const descJson = JSON.stringify({
+    en: body.descriptionEn?.trim() || '',
+    zh: body.descriptionZh?.trim() || '',
+  });
+  await sql(
+    c.env.DB,
+    `INSERT INTO challenge_categories(id, name_json, description_json, sort_order) VALUES(?,?,?,?)`,
+    body.id,
+    nameJson,
+    descJson,
+    body.sortOrder
+  ).run();
+  const created = await sql(c.env.DB, categories + ' WHERE cc.id=?', body.id).first<Record<string, unknown>>();
+  return c.json(created ? unpack(created) : { id: body.id }, 201);
+});
+
+adminConsole.patch('/api/admin/console/categories/:id', async (c) => {
+  assertAdminIp(c, true);
+  const idParam = categoryId.parse(c.req.param('id'));
+  const body = await json(
+    c,
+    z
+      .object({
+        nameZh: field(80).optional(),
+        nameEn: field(80).optional(),
+        descriptionZh: z.string().trim().max(400).optional(),
+        descriptionEn: z.string().trim().max(400).optional(),
+        sortOrder: z.number().int().min(0).max(9999).optional(),
+      })
+      .strict()
+  );
+  const existing = await sql(
+    c.env.DB,
+    'SELECT id, name_json, description_json, sort_order FROM challenge_categories WHERE id=?',
+    idParam
+  ).first<{ id: string; name_json: string; description_json: string; sort_order: number }>();
+  if (!existing) fail(404, 'NOT_FOUND', 'Category not found.');
+
+  const curName = JSON.parse(existing.name_json) as { en: string; zh: string };
+  const curDesc = JSON.parse(existing.description_json) as { en: string; zh: string };
+  const nextName = {
+    en: body.nameEn ?? curName.en,
+    zh: body.nameZh ?? curName.zh,
+  };
+  const nextDesc = {
+    en: body.descriptionEn !== undefined ? body.descriptionEn : curDesc.en,
+    zh: body.descriptionZh !== undefined ? body.descriptionZh : curDesc.zh,
+  };
+  const nextOrder = body.sortOrder ?? existing.sort_order;
+
+  await sql(
+    c.env.DB,
+    `UPDATE challenge_categories SET name_json=?, description_json=?, sort_order=?, updated_at=${now} WHERE id=?`,
+    JSON.stringify(nextName),
+    JSON.stringify(nextDesc),
+    nextOrder,
+    idParam
+  ).run();
+  const updated = await sql(c.env.DB, categories + ' WHERE cc.id=?', idParam).first<Record<string, unknown>>();
+  return c.json(updated ? unpack(updated) : { id: idParam });
+});
+
+adminConsole.delete('/api/admin/console/categories/:id', async (c) => {
+  assertAdminIp(c, true);
+  const idParam = categoryId.parse(c.req.param('id'));
+  const existing = await sql(
+    c.env.DB,
+    'SELECT id, (SELECT count(*) FROM challenges WHERE category=challenge_categories.id) n FROM challenge_categories WHERE id=?',
+    idParam
+  ).first<{ id: string; n: number }>();
+  if (!existing) fail(404, 'NOT_FOUND', 'Category not found.');
+  if (Number(existing.n) > 0) {
+    fail(409, 'CONFLICT', 'Cannot delete a category that is still assigned to projects; reassign them first.');
+  }
+  await sql(c.env.DB, 'DELETE FROM challenge_categories WHERE id=?', idParam).run();
+  return c.json({ id: idParam, deleted: true });
 });
 
 adminConsole.patch('/api/admin/console/tasks/:taskId/status', async (c) => {

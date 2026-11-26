@@ -1,6 +1,15 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { bearer, browser, maintainer, type Principal } from './auth';
+import {
+  CHAT_OUTPUT_SCHEMA_KINDS,
+  EFFORT_TIERS,
+  PARTICIPATION_MODES,
+  RAID_CLASS_IDS,
+  inferClassFromTaskType,
+  isClassAllowedForMode,
+  type ParticipationMode,
+} from '@common-intelligence/shared';
+import { bearer, browser, maintainer, tokenPepper, type Principal } from './auth';
 import { mutate } from './mutations';
 import {
   type App,
@@ -13,7 +22,6 @@ import {
   now,
   id,
   random,
-  required,
   digest,
   json,
   rate,
@@ -24,7 +32,9 @@ import {
 import { expire, replenish, replenishStanding } from './task-pool';
 import { reconcile } from './verification';
 
-const taskTypes = [
+const LEASE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+const dbTaskTypes = [
   'Research',
   'Search',
   'Implementation',
@@ -34,27 +44,68 @@ const taskTypes = [
   'Documentation',
   'Integration',
 ] as const;
-const proposal = z
-  .object({
-    title: field(180),
-    description: field(6000),
-    taskType: z.enum(taskTypes),
-    priority: z.enum(['Critical', 'High', 'Normal', 'Low']),
-    dependencies: z
-      .array(key)
-      .max(12)
-      .refine((x) => new Set(x).size === x.length),
-    requiredCapabilities: z.array(field(100)).max(12),
-    acceptanceCriteria: z.array(field(1000)).min(1).max(12),
-    outputRequirements: field(2000),
-  })
-  .strict();
+type DbTaskType = (typeof dbTaskTypes)[number];
+
+const taskTypeAliases: Record<string, DbTaskType> = {
+  Research: 'Research',
+  Search: 'Search',
+  Implementation: 'Implementation',
+  Verification: 'Verification',
+  Counterexample: 'Counterexample',
+  Optimization: 'Optimization',
+  Documentation: 'Documentation',
+  Integration: 'Integration',
+  Feature: 'Implementation',
+  Experiment: 'Research',
+  Creative: 'Implementation',
+  Playtest: 'Verification',
+  Bugfix: 'Optimization',
+};
+
+const normalizedTaskType = z
+  .string()
+  .trim()
+  .optional()
+  .transform((val): DbTaskType => (val && taskTypeAliases[val] ? taskTypeAliases[val]! : 'Implementation'));
+
+const proposal = z.object({
+  title: field(180),
+  description: field(6000),
+  taskType: normalizedTaskType,
+  priority: z.enum(['Critical', 'High', 'Normal', 'Low']).default('Normal'),
+  recommendedClass: z.enum(RAID_CLASS_IDS).optional(),
+  effortTier: z.enum(EFFORT_TIERS).optional(),
+  supportedModes: z.array(z.enum(PARTICIPATION_MODES)).min(1).max(2).optional(),
+  outputSchemaKind: z.enum(CHAT_OUTPUT_SCHEMA_KINDS).optional(),
+  dependencies: z
+    .array(key)
+    .max(12)
+    .refine((x) => new Set(x).size === x.length)
+    .default([]),
+  requiredCapabilities: z.array(field(100)).max(12).default([]),
+  acceptanceCriteria: z.array(field(1000)).max(12).default([]),
+  outputRequirements: z.string().trim().max(2000).optional(),
+});
+
 const lease = z.object({ agentId: key, leaseToken: z.string().regex(/^ci_lease_[0-9a-f]{64}$/) });
 export const work = new Hono<App>();
 export { expire, replenish, replenishStanding };
+
 const liveChallenge = (db: D1Database, cid: string) =>
   guard(db, 'CONFLICT', "EXISTS(SELECT 1 FROM challenges WHERE id=? AND status='Active')", cid);
-function newProposal(
+
+async function hasUnfinishedDeps(db: D1Database, cid: string, dependencies: string[]): Promise<boolean> {
+  if (dependencies.length === 0) return false;
+  const row = await sql(
+    db,
+    `SELECT count(*) n FROM tasks WHERE challenge_id=? AND task_id IN (SELECT value FROM json_each(?)) AND status!='Accepted'`,
+    cid,
+    JSON.stringify(dependencies)
+  ).first<{ n: number }>();
+  return Number(row?.n ?? 0) > 0;
+}
+
+async function newProposal(
   db: D1Database,
   p: Principal,
   cid: string,
@@ -64,15 +115,43 @@ function newProposal(
 ) {
   const tid = id('task'),
     date = iso();
+  const blockedByDeps = await hasUnfinishedDeps(db, cid, b.dependencies);
+  const initialStatus = blockedByDeps ? 'Pending' : 'Available';
+  const criteria = b.acceptanceCriteria.length > 0 ? b.acceptanceCriteria : ['Working PR, demo, or experiment note'];
+  const outputReq = b.outputRequirements?.trim() || 'Open a PR or share results in the project feed.';
+  const recommendedClass = b.recommendedClass ?? inferClassFromTaskType(b.taskType);
+  const effortTier = b.effortTier ?? (isClassAllowedForMode(recommendedClass, 'chat') ? 'S' : 'M');
+  const rawModes: ParticipationMode[] =
+    b.supportedModes ?? (isClassAllowedForMode(recommendedClass, 'chat') ? ['chat', 'agent'] : ['agent']);
+  // Enforce entry-tier class gating: advanced classes never allow Chat mode.
+  const supportedModes: ParticipationMode[] = isClassAllowedForMode(recommendedClass, 'chat')
+    ? [...new Set(rawModes)]
+    : ['agent'];
+  const deliveryMode = supportedModes.includes('chat') ? 'artifact_api' : 'pr_auto_verify';
+  const verificationMode = supportedModes.includes('chat') ? 'peer_or_agent_verify' : 'pr_auto_verify';
+  const outputSchemaKind =
+    b.outputSchemaKind ??
+    (supportedModes.includes('chat')
+      ? recommendedClass === 'arbiter'
+        ? 'counterexample_review'
+        : 'hypothesis_proposal'
+      : null);
+
   const result = {
     ...b,
     taskId: tid,
     challengeId: cid,
     title: localized(b.title),
     description: localized(b.description),
-    status: 'Proposed',
-    acceptanceCriteria: b.acceptanceCriteria.map(localized),
-    outputRequirements: localized(b.outputRequirements),
+    status: initialStatus,
+    recommendedClass,
+    effortTier,
+    supportedModes: [...supportedModes],
+    deliveryMode,
+    outputSchemaKind,
+    verificationMode,
+    acceptanceCriteria: criteria.map(localized),
+    outputRequirements: localized(outputReq),
     inputArtifacts: [],
     assignedAgentId: null,
     leaseExpiresAt: null,
@@ -87,15 +166,23 @@ function newProposal(
     liveChallenge(db, cid),
     sql(
       db,
-      `INSERT INTO tasks(task_id,challenge_id,title_json,description_json,task_type,priority,
+      `INSERT INTO tasks(task_id,challenge_id,title_json,description_json,task_type,priority,status,
+    recommended_class,effort_tier,supported_modes_json,delivery_mode,output_schema_kind,verification_mode,
     required_capabilities_json,acceptance_criteria_json,output_requirements_json,proposed_by_github_id,plan_id,created_at,updated_at)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       tid,
       cid,
       JSON.stringify(result.title),
       JSON.stringify(result.description),
       b.taskType,
       b.priority,
+      initialStatus,
+      recommendedClass,
+      effortTier,
+      JSON.stringify(supportedModes),
+      deliveryMode,
+      outputSchemaKind,
+      verificationMode,
       JSON.stringify(b.requiredCapabilities),
       JSON.stringify(result.acceptanceCriteria),
       JSON.stringify(result.outputRequirements),
@@ -122,14 +209,16 @@ function newProposal(
   ];
   return { result, writes };
 }
+
 work.post('/api/tasks/propose', async (c) => {
   const p = c.req.header('Authorization') ? await bearer(c, 'tasks:propose') : await browser(c);
   const b = await json(c, proposal.extend({ challengeId: key }));
   return mutate(c, p, async () => {
-    await rate(c, (p.token ?? p.owner) + ':propose', 86400, 10);
-    return { ...newProposal(c.env.DB, p, b.challengeId, b), status: 201 };
+    await rate(c, (p.token ?? p.owner) + ':propose', 86400, 25);
+    return { ...(await newProposal(c.env.DB, p, b.challengeId, b)), status: 201 };
   });
 });
+
 work.post('/api/tasks/:id/approve', async (c) => {
   await maintainer(c);
   const tid = c.req.param('id'),
@@ -138,41 +227,58 @@ work.post('/api/tasks/:id/approve', async (c) => {
     db,
     `UPDATE tasks SET status=CASE WHEN EXISTS(SELECT 1 FROM task_dependencies d JOIN tasks t
     ON t.task_id=d.depends_on_task_id WHERE d.task_id=? AND t.status!='Accepted') THEN 'Pending' ELSE 'Available' END, updated_at=${now}
-    WHERE task_id=? AND status='Proposed' AND challenge_id IN (SELECT id FROM challenges WHERE status='Active') RETURNING status,plan_id`,
+    WHERE task_id=? AND status IN ('Proposed','Available') AND challenge_id IN (SELECT id FROM challenges WHERE status='Active') RETURNING status,plan_id`,
     tid,
     tid
   ).first<{ status: string; plan_id: string | null }>();
   if (!result) fail(409, 'CONFLICT');
   return c.json({ taskId: tid, status: result.status });
 });
+
 work.post('/api/tasks/:id/reject', async (c) => {
   await maintainer(c);
   const tid = c.req.param('id'),
     db = c.env.DB;
   const row = await sql(
     db,
-    `UPDATE tasks SET status='Rejected',updated_at=${now} WHERE task_id=? AND status='Proposed' RETURNING plan_id`,
+    `UPDATE tasks SET status='Rejected',updated_at=${now} WHERE task_id=? AND status IN ('Proposed','Available','Pending') RETURNING plan_id`,
     tid
   ).first<{ plan_id: string | null }>();
   if (!row) fail(409, 'CONFLICT');
   return c.json({ taskId: tid, status: 'Rejected' });
 });
+
 work.post('/api/tasks/claim', async (c) => {
   const p = await bearer(c, 'tasks:claim');
-  const b = await json(c, z.object({ challengeId: key, agentId: key, taskId: key.optional() }).strict());
+  const b = await json(
+    c,
+    z.object({
+      challengeId: key,
+      agentId: key,
+      taskId: key.optional(),
+      classId: z.enum([...RAID_CLASS_IDS, 'auto']).optional(),
+      budgetTier: z.enum(EFFORT_TIERS).optional(),
+    })
+  );
   const response = await mutate(c, p, async () => {
-    await rate(c, p.token + ':claim', 3600, 10);
+    await rate(c, p.token + ':claim', 3600, 30);
     const db = c.env.DB,
       lid = id('lease'),
       token = 'ci_lease_' + random(),
-      expires = iso(1800000);
-    const hash = await digest(token + required(c.env.TOKEN_PEPPER));
+      expires = iso(LEASE_TTL_MS);
+    const hash = await digest(token + tokenPepper(c));
+    const classPref = b.classId && b.classId !== 'auto' ? b.classId : null;
+    const budgetPref = b.budgetTier ?? null;
     const candidate = `SELECT t.task_id FROM tasks t WHERE challenge_id=? AND (? IS NULL OR t.task_id=?)
       AND status='Available' AND (is_planning=0 OR EXISTS(SELECT 1 FROM agent_tokens tok,json_each(tok.scopes_json) s
         WHERE tok.id=? AND s.value='tasks:propose')) AND NOT EXISTS(SELECT 1 FROM task_dependencies d JOIN tasks upstream
         ON upstream.task_id=d.depends_on_task_id WHERE d.task_id=t.task_id AND upstream.status!='Accepted')
-      ORDER BY is_planning,CASE priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END,created_at,task_id LIMIT 1`;
-    const filter = [b.challengeId, b.taskId ?? null, b.taskId ?? null, p.token];
+      ORDER BY is_planning,
+        CASE WHEN ? IS NOT NULL AND t.recommended_class=? THEN 0 ELSE 1 END,
+        CASE WHEN ? IS NOT NULL AND t.effort_tier=? THEN 0 ELSE 1 END,
+        CASE priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Normal' THEN 2 ELSE 3 END,
+        created_at,task_id LIMIT 1`;
+    const filter = [b.challengeId, b.taskId ?? null, b.taskId ?? null, p.token, classPref, classPref, budgetPref, budgetPref];
     return {
       result: { leaseId: lid, leaseToken: token, leaseExpiresAt: expires },
       writes: [
@@ -228,11 +334,18 @@ work.post('/api/tasks/claim', async (c) => {
   ).first<string>('task_id');
   return c.json({ ...receipt, taskId });
 });
-async function leaseContext(c: Ctx, p: Principal, tid: string, b: z.infer<typeof lease>) {
+
+async function leaseContext(
+  c: Ctx,
+  p: Principal,
+  tid: string,
+  b: z.infer<typeof lease>,
+  allowGraceSubmit = false
+) {
   const db = c.env.DB;
   const row = await sql(
     db,
-    `SELECT l.id,l.status,l.expires_at,t.challenge_id,t.is_planning,h.github_repo_owner||'/'||h.github_repo_name repo,
+    `SELECT l.id,l.status,l.expires_at,t.status task_status,t.challenge_id,t.is_planning,h.github_repo_owner||'/'||h.github_repo_name repo,
     u.username,a.self_reported_model model FROM task_leases l JOIN tasks t ON t.task_id=l.task_id JOIN challenges h ON h.id=t.challenge_id
     JOIN users u ON u.github_id=l.owner_github_id JOIN agents a ON a.id=l.agent_id
     WHERE l.task_id=? AND l.agent_id=? AND l.owner_github_id=? AND (? IS NULL OR l.token_id=?) AND l.lease_token_hash=?`,
@@ -241,11 +354,12 @@ async function leaseContext(c: Ctx, p: Principal, tid: string, b: z.infer<typeof
     p.owner,
     p.token,
     p.token,
-    await digest(b.leaseToken + required(c.env.TOKEN_PEPPER))
+    await digest(b.leaseToken + tokenPepper(c))
   ).first<{
     id: string;
     status: string;
     expires_at: string;
+    task_status: string;
     challenge_id: string;
     is_planning: number;
     repo: string;
@@ -253,7 +367,20 @@ async function leaseContext(c: Ctx, p: Principal, tid: string, b: z.infer<typeof
     model: string;
   }>();
   if (!row) fail(409, 'INVALID_LEASE_TOKEN');
-  if (row.status === 'expired' || row.expires_at <= iso()) fail(409, 'LEASE_EXPIRED');
+
+  const isExpired = row.status === 'expired' || row.expires_at <= iso();
+  if (isExpired) {
+    if (allowGraceSubmit && row.task_status === 'Available') {
+      const graceGuard = guard(
+        db,
+        'LEASE_CONFLICT',
+        `EXISTS(SELECT 1 FROM tasks WHERE task_id=? AND status='Available')`,
+        tid
+      );
+      return { ...row, active: graceGuard, graceExpired: true };
+    }
+    fail(409, 'LEASE_EXPIRED');
+  }
   if (row.status !== 'active') fail(409, 'CONFLICT');
   const active = guard(
     db,
@@ -261,24 +388,26 @@ async function leaseContext(c: Ctx, p: Principal, tid: string, b: z.infer<typeof
     `EXISTS(SELECT 1 FROM task_leases WHERE id=? AND status='active' AND expires_at>${now})`,
     row.id
   );
-  return { ...row, active };
+  return { ...row, active, graceExpired: false };
 }
+
 work.post('/api/tasks/:id/heartbeat', async (c) => {
   const p = await bearer(c, 'tasks:claim'),
-    b = await json(c, lease.strict()),
+    b = await json(c, lease),
     tid = c.req.param('id'),
     db = c.env.DB;
   await rate(c, p.token + ':heartbeat', 3600, 120);
   const l = await leaseContext(c, p, tid, b),
-    expires = iso(1800000);
+    expires = iso(LEASE_TTL_MS);
   await db.batch([l.active, sql(db, 'UPDATE task_leases SET expires_at=? WHERE id=?', expires, l.id)]);
   return c.json({ taskId: tid, leaseExpiresAt: expires });
 });
+
 work.post('/api/tasks/:id/release', async (c) => {
   const p = c.req.header('Authorization') ? await bearer(c, 'tasks:claim') : await browser(c);
   const b = await json(
     c,
-    lease.extend({ reason: field(1000), progressNotes: z.string().max(6000).optional() }).strict()
+    lease.extend({ reason: z.string().trim().max(1000).default('Handing task back to pool'), progressNotes: z.string().max(6000).optional() })
   );
   const tid = c.req.param('id'),
     db = c.env.DB,
@@ -315,43 +444,51 @@ work.post('/api/tasks/:id/release', async (c) => {
   await db.batch(writes);
   return c.json({ taskId: tid, status: 'Available' });
 });
+
 work.post('/api/tasks/:id/plan', async (c) => {
   const p = await bearer(c, 'tasks:propose');
-  const b = await json(c, lease.extend({ tasks: z.array(proposal).min(1).max(10) }).strict()),
+  const b = await json(c, lease.extend({ tasks: z.array(proposal).min(1).max(10) })),
     tid = c.req.param('id'),
     db = c.env.DB;
   return mutate(c, p, async () => {
     const l = await leaseContext(c, p, tid, b);
     if (!l.is_planning) fail(409, 'CONFLICT', 'Expected a planning task.');
-    await rate(c, p.token + ':propose', 86400, 10);
-    const children = b.tasks.map((x) => newProposal(db, p, l.challenge_id, x, tid, b.agentId));
+    await rate(c, p.token + ':propose', 86400, 25);
+    const children = [];
+    for (const x of b.tasks) {
+      children.push(await newProposal(db, p, l.challenge_id, x, tid, b.agentId));
+    }
     return {
-      result: { taskId: tid, status: 'Submitted', taskIds: children.map((x) => x.result.taskId) },
+      result: { taskId: tid, status: 'Accepted', taskIds: children.map((x) => x.result.taskId) },
       writes: [
         l.active,
         ...children.flatMap((x) => x.writes),
         sql(db, `UPDATE task_leases SET status='submitted',ended_at=${now} WHERE id=?`, l.id),
+        sql(db, `UPDATE tasks SET status='Accepted',updated_at=${now} WHERE task_id=?`, tid),
       ],
     };
   });
 });
+
 work.post('/api/tasks/:id/submit', async (c) => {
   const p = await bearer(c, 'tasks:claim'),
     b = await json(
       c,
-      lease
-        .extend({ prUrl: field(500), headSha: z.string().regex(/^[0-9a-f]{40}$/), summary: field(6000) })
-        .strict()
+      lease.extend({
+        prUrl: field(500),
+        headSha: z.string().regex(/^[0-9a-f]{40}$/),
+        summary: field(6000),
+      })
     );
   const tid = c.req.param('id'),
     db = c.env.DB;
   const result = await mutate(c, p, async () => {
-    const l = await leaseContext(c, p, tid, b);
+    const l = await leaseContext(c, p, tid, b, true);
     if (l.is_planning) fail(409, 'CONFLICT', 'Submit planning tasks through /plan.');
     const match = b.prUrl.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/([1-9]\d*)$/);
     if (!match || match[1] !== l.repo || !Number.isSafeInteger(Number(match[2])))
       fail(400, 'VALIDATION_ERROR', 'Expected a pull request in the challenge repository.');
-    await rate(c, p.token + ':submit', 3600, 20);
+    await rate(c, p.token + ':submit', 3600, 30);
     const number = Number(match[2]),
       pr = id('pr');
     return {
@@ -393,6 +530,16 @@ work.post('/api/tasks/:id/submit', async (c) => {
           b.summary
         ),
         sql(db, `UPDATE task_leases SET status='submitted',ended_at=${now} WHERE id=?`, l.id),
+        ...(l.graceExpired
+          ? [
+              sql(
+                db,
+                `UPDATE tasks SET status='Submitted',assigned_agent_id=?,lease_expires_at=NULL,updated_at=${now} WHERE task_id=?`,
+                b.agentId,
+                tid
+              ),
+            ]
+          : []),
         event(db, 'pr_submitted', l.challenge_id, p.owner, b.summary, tid, b.agentId, pr),
       ],
     };
@@ -408,7 +555,7 @@ work.post('/api/tasks/:id/revision', async (c) => {
     tid = c.req.param('id');
   const b = await json(
     c,
-    lease.extend({ headSha: z.string().regex(/^[0-9a-f]{40}$/), summary: field(6000) }).strict()
+    lease.extend({ headSha: z.string().regex(/^[0-9a-f]{40}$/), summary: field(6000) })
   );
   const response = await mutate(c, p, async () => {
     const row = await sql(
@@ -420,10 +567,10 @@ work.post('/api/tasks/:id/revision', async (c) => {
       p.owner,
       p.token,
       b.agentId,
-      await digest(b.leaseToken + required(c.env.TOKEN_PEPPER))
+      await digest(b.leaseToken + tokenPepper(c))
     ).first<{ id: string; pr_url: string; leaseId: string; oldHead: string; challenge_id: string }>();
     if (!row) fail(409, 'INVALID_LEASE_TOKEN');
-    await rate(c, p.token + ':submit', 3600, 20);
+    await rate(c, p.token + ':submit', 3600, 30);
     return {
       result: { taskId: tid, status: 'Submitted', headSha: b.headSha },
       writes: [

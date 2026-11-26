@@ -1,11 +1,16 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
-import type {
-  AgentRecord,
-  AgentToken,
-  AgentTokenScope,
-  UserProfileSummary,
+import {
+  AGENT_CADENCE_MODES,
+  BUDGET_TIERS,
+  EFFORT_TIERS,
+  RAID_CLASS_IDS,
+  type AgentRecord,
+  type AgentToken,
+  type AgentTokenScope,
+  type QuickstartAgentResponse,
+  type UserProfileSummary,
 } from '@common-intelligence/shared';
 import { agents, publicAgents, users, tokens } from './selects';
 import {
@@ -41,6 +46,11 @@ const LOCAL_DEV_USER = {
   profileUrl: 'https://github.com/local-dev',
   role: 'maintainer',
 } as const;
+const JOIN_CODE_TTL_MS = 30 * 60 * 1000;
+const JOIN_TOKEN_TTL_MS = 7 * 86400000;
+const DEFAULT_MAX_CONCURRENT = 3;
+const DEFAULT_MAX_TOTAL = 30;
+
 function isLocalOrigin(raw: string | undefined): boolean {
   if (!raw) return false;
   try {
@@ -56,6 +66,11 @@ function isLocalDevAuthBypass(c: Ctx): boolean {
     isLocalOrigin(c.env.APP_ORIGIN) &&
     isLocalOrigin(c.req.url)
   );
+}
+export function tokenPepper(c: Ctx): string {
+  if (c.env.TOKEN_PEPPER) return c.env.TOKEN_PEPPER;
+  if (isLocalDevAuthBypass(c)) return 'local-dev-token-pepper';
+  return required(c.env.TOKEN_PEPPER);
 }
 async function ensureLocalDevSession(c: Ctx): Promise<Session> {
   await sql(
@@ -81,7 +96,7 @@ async function ensureLocalDevSession(c: Ctx): Promise<Session> {
 }
 export async function session(c: Ctx) {
   const value = getCookie(c, 'ci_session');
-  if (!value) {
+  if (!value || (!c.env.SESSION_SECRET && isLocalDevAuthBypass(c))) {
     return isLocalDevAuthBypass(c) ? ensureLocalDevSession(c) : null;
   }
   return sql(
@@ -115,11 +130,25 @@ export async function browser(c: Ctx, mutation = true): Promise<Principal> {
   }
   return { owner: s.github_id, token: null, role: s.role };
 }
+const isMissingColumnError = (err: unknown) => /no such column|has no column named/i.test(String(err));
+
 const isMaintainer = (role?: string) => role === 'maintainer' || role === 'admin';
 export async function maintainer(c: Ctx, mutation = true) {
   const p = await browser(c, mutation);
   if (!isMaintainer(p.role)) fail(403, 'FORBIDDEN');
   return p;
+}
+export async function anyBearer(c: Ctx): Promise<Principal> {
+  const token = c.req.header('Authorization')?.match(/^Bearer (ci_agt_[0-9a-f]{64})$/i)?.[1];
+  if (!token) fail(401, 'UNAUTHORIZED');
+  const row = await sql(
+    c.env.DB,
+    `UPDATE agent_tokens SET last_used_at=${now} WHERE token_hash=? AND revoked_at IS NULL AND expires_at>${now}
+    RETURNING id,owner_github_id`,
+    await digest(token + tokenPepper(c))
+  ).first<{ id: string; owner_github_id: string }>();
+  if (!row) fail(401, 'UNAUTHORIZED');
+  return { owner: row.owner_github_id, token: row.id, role: 'agent' };
 }
 export async function bearer(c: Ctx, scope: AgentTokenScope): Promise<Principal> {
   const token = c.req.header('Authorization')?.match(/^Bearer (ci_agt_[0-9a-f]{64})$/i)?.[1];
@@ -128,7 +157,7 @@ export async function bearer(c: Ctx, scope: AgentTokenScope): Promise<Principal>
     c.env.DB,
     `UPDATE agent_tokens SET last_used_at=${now} WHERE token_hash=? AND revoked_at IS NULL AND expires_at>${now}
     RETURNING id,owner_github_id,scopes_json`,
-    await digest(token + required(c.env.TOKEN_PEPPER))
+    await digest(token + tokenPepper(c))
   ).first<{ id: string; owner_github_id: string; scopes_json: string }>();
   if (!row) fail(401, 'UNAUTHORIZED');
   if (!JSON.parse(row.scopes_json).includes(scope)) fail(403, 'FORBIDDEN');
@@ -138,7 +167,7 @@ const cookie = { httpOnly: true, secure: true, sameSite: 'Lax' } as const;
 const statePath = '/auth/github/callback';
 const projectLoginPaths = new Set(['/projects/new', '/settings/project-proposals', '/admin', '/admin/project-proposals']);
 const validReturnPath = (path: string) =>
-  projectLoginPaths.has(path) || /^\/challenges\/[a-z0-9][a-z0-9-]{0,79}#agent-access$/.test(path);
+  projectLoginPaths.has(path) || /^\/challenges\/[a-z0-9][a-z0-9-]{0,79}(#agent-access)?$/.test(path);
 export const auth = new Hono<App>();
 auth.get('/auth/github', (c) => {
   const returnTo = c.req.query('returnTo') ?? '';
@@ -265,16 +294,14 @@ auth.post('/api/agent-tokens', async (c) => {
   const p = await browser(c);
   const b = await json(
     c,
-    z
-      .object({
-        name: field(100),
-        expiresInDays: z.number().int().min(1).max(90),
-        maxConcurrentTasks: z.number().int().min(1).max(5),
-        maxTotalTasks: z.number().int().min(1).max(100),
-        budgetNote: z.string().max(500).optional(),
-        scopes: z.array(z.enum(scopes)).min(1).max(scopes.length),
-      })
-      .strict()
+    z.object({
+      name: field(100),
+      expiresInDays: z.number().int().min(1).max(90).default(30),
+      maxConcurrentTasks: z.number().int().min(1).max(5).default(DEFAULT_MAX_CONCURRENT),
+      maxTotalTasks: z.number().int().min(1).max(100).default(DEFAULT_MAX_TOTAL),
+      budgetNote: z.string().max(500).optional(),
+      scopes: z.array(z.enum(scopes)).min(1).max(scopes.length).default([...scopes]),
+    })
   );
   const token = 'ci_agt_' + random(),
     tid = id('tok');
@@ -286,7 +313,7 @@ auth.post('/api/agent-tokens', async (c) => {
     p.owner,
     b.name,
     token.slice(0, 14),
-    await digest(token + required(c.env.TOKEN_PEPPER)),
+    await digest(token + tokenPepper(c)),
     JSON.stringify([...new Set(b.scopes)]),
     b.maxConcurrentTasks,
     b.maxTotalTasks,
@@ -311,63 +338,225 @@ auth.delete('/api/agent-tokens/:id', async (c) => {
 });
 auth.post('/api/agent-join', async (c) => {
   const principal = await browser(c);
-  const { challengeId } = await json(c, z.object({ challengeId: field(150) }).strict());
-  await rate(c, 'agent-join:' + principal.owner, 3600, 20);
+  const body = await json(
+    c,
+    z.object({
+      challengeId: field(150),
+      classId: z.enum([...RAID_CLASS_IDS, 'auto']).optional(),
+      budgetTier: z.enum(EFFORT_TIERS).optional(),
+      cadenceMode: z.enum(AGENT_CADENCE_MODES).optional(),
+    })
+  );
+  await rate(c, 'agent-join:' + principal.owner, 3600, 60);
   const code = 'ci_join_' + random();
-  const expiresAt = iso(5 * 60 * 1000);
-  const saved = await sql(
-    c.env.DB,
-    `INSERT INTO agent_join_codes(code_hash,owner_github_id,challenge_id,expires_at)
-     SELECT ?,?,id,? FROM challenges WHERE id=? AND status='Active' RETURNING challenge_id`,
-    await digest(code + required(c.env.TOKEN_PEPPER)),
-    principal.owner,
-    expiresAt,
-    challengeId
-  ).first();
+  const expiresAt = iso(JOIN_CODE_TTL_MS);
+  const sessionConfig = {
+    classId: body.classId ?? 'auto',
+    ...(body.budgetTier ? { budgetTier: body.budgetTier } : {}),
+    cadenceMode: body.cadenceMode ?? 'single',
+  };
+  const codeHash = await digest(code + tokenPepper(c));
+  let saved: Record<string, unknown> | null = null;
+  try {
+    saved = await sql(
+      c.env.DB,
+      `INSERT INTO agent_join_codes(code_hash,owner_github_id,challenge_id,expires_at,session_config_json)
+       SELECT ?,?,id,?,? FROM challenges WHERE (id=? OR slug=?) AND status='Active' RETURNING challenge_id`,
+      codeHash,
+      principal.owner,
+      expiresAt,
+      JSON.stringify(sessionConfig),
+      body.challengeId,
+      body.challengeId
+    ).first();
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err;
+    saved = await sql(
+      c.env.DB,
+      `INSERT INTO agent_join_codes(code_hash,owner_github_id,challenge_id,expires_at)
+       SELECT ?,?,id,? FROM challenges WHERE (id=? OR slug=?) AND status='Active' RETURNING challenge_id`,
+      codeHash,
+      principal.owner,
+      expiresAt,
+      body.challengeId,
+      body.challengeId
+    ).first();
+  }
   if (!saved) fail(404, 'NOT_FOUND', 'This project is not open to agents.');
-  return c.json({ code, expiresAt }, 201);
+  return c.json({ code, expiresAt, sessionConfig }, 201);
 });
 auth.post('/api/agent-join/redeem', async (c) => {
-  const { code } = await json(c, z.object({ code: z.string().regex(/^ci_join_[a-f0-9]{64}$/) }).strict());
+  const { code } = await json(c, z.object({ code: z.string().regex(/^ci_join_[a-f0-9]{64}$/) }));
   const db = c.env.DB;
-  const pepper = required(c.env.TOKEN_PEPPER);
+  const pepper = tokenPepper(c);
   const hash = await digest(code + pepper);
   const plaintextToken = 'ci_agt_' + random();
-  const expiresAt = iso(86400000);
+  const expiresAt = iso(JOIN_TOKEN_TTL_MS);
   const eligible = `code_hash=? AND expires_at>${now}
     AND challenge_id IN (SELECT id FROM challenges WHERE status='Active')`;
   const [, consumed] = await db.batch<{ challenge_id: string }>([
     sql(
       db,
-      `INSERT INTO agent_tokens(id,owner_github_id,name,token_prefix,token_hash,scopes_json,expires_at)
-       SELECT ?,j.owner_github_id,substr('Project prompt · '||h.name,1,100),?,?,?,?
+      `INSERT INTO agent_tokens(id,owner_github_id,name,token_prefix,token_hash,scopes_json,max_concurrent_tasks,max_total_tasks,expires_at)
+       SELECT ?,j.owner_github_id,substr('Quick join · '||h.name,1,100),?,?,?,?,?,?
        FROM agent_join_codes j JOIN challenges h ON h.id=j.challenge_id WHERE ${eligible}`,
       id('tok'),
       plaintextToken.slice(0, 14),
       await digest(plaintextToken + pepper),
       JSON.stringify(scopes),
+      DEFAULT_MAX_CONCURRENT,
+      DEFAULT_MAX_TOTAL,
       expiresAt,
       hash
     ),
     sql(db, `DELETE FROM agent_join_codes WHERE ${eligible} RETURNING challenge_id`, hash),
   ]);
   const grant = consumed.results[0];
-  if (!grant) fail(401, 'UNAUTHORIZED', 'The project prompt code has expired or been used. Copy a new prompt.');
+  if (!grant) fail(401, 'UNAUTHORIZED', 'The join code has expired or been used. Copy a fresh prompt.');
   return c.json({ plaintextToken, challengeId: grant.challenge_id, expiresAt }, 201);
 });
-auth.post('/api/agents/register', async (c) => {
-  const p = await bearer(c, 'agent:register');
-  await rate(c, p.token + ':register', 3600, 10);
+
+// Single-step onboarding: redeem join code + mint 7-day token + register agent in one call.
+auth.post('/api/agent-join/quickstart', async (c) => {
   const b = await json(
     c,
-    z
-      .object({
-        label: field(80),
-        selfReportedModel: field(80),
-        selfReportedClient: field(80),
-        challengeId: field(150).optional(),
-      })
-      .strict()
+    z.object({
+      code: z.string().regex(/^ci_join_[a-f0-9]{64}$/),
+      label: z.string().trim().min(1).max(80).optional(),
+      selfReportedModel: z.string().trim().min(1).max(80).optional(),
+      selfReportedClient: z.string().trim().min(1).max(80).optional(),
+      declaredEnv: z.array(field(40)).max(12).optional(),
+    })
+  );
+  const db = c.env.DB;
+  const pepper = tokenPepper(c);
+  const hash = await digest(b.code + pepper);
+  const plaintextToken = 'ci_agt_' + random();
+  const tokenId = id('tok');
+  const agentId = id('agt');
+  const expiresAt = iso(JOIN_TOKEN_TTL_MS);
+  const label = b.label ?? 'community-agent';
+  const model = b.selfReportedModel ?? 'unspecified';
+  const client = b.selfReportedClient ?? 'custom-agent';
+
+  const eligible = `code_hash=? AND expires_at>${now}
+    AND challenge_id IN (SELECT id FROM challenges WHERE status='Active')`;
+  let parsedSession: { classId?: string; budgetTier?: string; cadenceMode?: string } = {};
+  try {
+    const existingJoin = await sql(
+      db,
+      `SELECT session_config_json FROM agent_join_codes WHERE ${eligible}`,
+      hash
+    ).first<{ session_config_json: string | null }>();
+    if (existingJoin?.session_config_json) parsedSession = JSON.parse(existingJoin.session_config_json);
+  } catch {
+    parsedSession = {};
+  }
+  const tierDef = BUDGET_TIERS.find((t) => t.id === parsedSession.budgetTier);
+  const maxConcurrent = tierDef?.maxConcurrentTasks ?? DEFAULT_MAX_CONCURRENT;
+  const maxTotal = tierDef?.maxTotalTasks ?? DEFAULT_MAX_TOTAL;
+  const preferredClass = parsedSession.classId ?? null;
+
+  const [, consumed] = await db.batch<{ challenge_id: string; owner_github_id: string }>([
+    sql(
+      db,
+      `INSERT INTO agent_tokens(id,owner_github_id,name,token_prefix,token_hash,scopes_json,max_concurrent_tasks,max_total_tasks,expires_at)
+       SELECT ?,j.owner_github_id,substr('Quick join · '||h.name,1,100),?,?,?,?,?,?
+       FROM agent_join_codes j JOIN challenges h ON h.id=j.challenge_id WHERE ${eligible}`,
+      tokenId,
+      plaintextToken.slice(0, 14),
+      await digest(plaintextToken + pepper),
+      JSON.stringify(scopes),
+      maxConcurrent,
+      maxTotal,
+      expiresAt,
+      hash
+    ),
+    sql(
+      db,
+      `DELETE FROM agent_join_codes WHERE ${eligible} RETURNING challenge_id, owner_github_id`,
+      hash
+    ),
+  ]);
+  const grant = consumed.results[0];
+  if (!grant) fail(401, 'UNAUTHORIZED', 'The join code has expired or been used. Copy a fresh prompt.');
+
+  const ch = await one<{ id: string; slug: string; showcaseJson: string | null }>(
+    db,
+    'SELECT id, slug, showcase_json showcaseJson FROM challenges WHERE id=?',
+    grant.challenge_id
+  );
+  const showcaseKind =
+    ch.showcaseJson && typeof ch.showcaseJson === 'object'
+      ? (ch.showcaseJson as { kind?: string }).kind
+      : undefined;
+
+  try {
+    await db.batch([
+      sql(
+        db,
+        'INSERT INTO agents(id,owner_github_id,token_id,label,self_reported_model,self_reported_client,preferred_class,declared_env_json) VALUES(?,?,?,?,?,?,?,?)',
+        agentId,
+        grant.owner_github_id,
+        tokenId,
+        label,
+        model,
+        client,
+        preferredClass,
+        JSON.stringify(b.declaredEnv ?? [])
+      ),
+      event(db, 'agent_registered', ch.id, grant.owner_github_id, 'Joined with agent (' + model + ')', null, agentId),
+    ]);
+  } catch (err) {
+    if (!isMissingColumnError(err)) throw err;
+    await db.batch([
+      sql(
+        db,
+        'INSERT INTO agents(id,owner_github_id,token_id,label,self_reported_model,self_reported_client) VALUES(?,?,?,?,?,?)',
+        agentId,
+        grant.owner_github_id,
+        tokenId,
+        label,
+        model,
+        client
+      ),
+      event(db, 'agent_registered', ch.id, grant.owner_github_id, 'Joined with agent (' + model + ')', null, agentId),
+    ]);
+  }
+
+  const response: QuickstartAgentResponse = {
+    plaintextToken,
+    agentId,
+    challengeId: ch.id,
+    challengeSlug: ch.slug,
+    expiresAt,
+    maxConcurrentTasks: maxConcurrent,
+    maxTotalTasks: maxTotal,
+    nextSteps: {
+      ...(showcaseKind === 'shared-canvas' || ch.slug === 'shared-canvas'
+        ? { canvasEndpoint: `/api/canvas/${ch.slug}/paint` }
+        : {}),
+      ...(showcaseKind === 'chess-trainer' || ch.slug === 'grandmaster'
+        ? { chessEndpoint: `/api/chess/${ch.slug}/vote` }
+        : {}),
+      tasksEndpoint: `/api/tasks?challengeId=${ch.id}&status=Available`,
+      notesEndpoint: `/api/challenges/${ch.slug}/notes`,
+    },
+  };
+  return c.json(response, 201);
+});
+
+auth.post('/api/agents/register', async (c) => {
+  const p = await bearer(c, 'agent:register');
+  await rate(c, p.token + ':register', 3600, 30);
+  const b = await json(
+    c,
+    z.object({
+      label: z.string().trim().min(1).max(80).default('community-agent'),
+      selfReportedModel: z.string().trim().min(1).max(80).default('unspecified'),
+      selfReportedClient: z.string().trim().min(1).max(80).default('custom-agent'),
+      challengeId: field(150).optional(),
+    })
   );
   const aid = id('agt'),
     db = c.env.DB;
@@ -386,7 +575,7 @@ auth.post('/api/agents/register', async (c) => {
   if (b.challengeId)
     writes.push(
       guard(db, 'NOT_FOUND', 'EXISTS(SELECT 1 FROM challenges WHERE id=?)', b.challengeId),
-      event(db, 'agent_registered', b.challengeId, p.owner, 'Registered agent (' + b.selfReportedModel + ')', null, aid)
+      event(db, 'agent_registered', b.challengeId, p.owner, 'Joined with agent (' + b.selfReportedModel + ')', null, aid)
     );
   await db.batch(writes);
   return c.json(await one<AgentRecord>(db, agents + ' WHERE a.id=?', aid), 201);

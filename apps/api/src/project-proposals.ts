@@ -12,7 +12,7 @@ import {
   type ProjectProposal,
 } from '@common-intelligence/shared';
 import { browser, maintainer } from './auth';
-import { challengeSlug, publishChallenge } from './challenge-write';
+import { categoryId, challengeSlug, publishChallenge } from './challenge-write';
 import { type App, type Ctx, fail, field, guard, id, iso, json, localized, one, page, rate, sql } from './core';
 import { deleteChallengeRepository, provisionChallengeRepository } from './github-repos';
 import { mutate } from './mutations';
@@ -20,6 +20,7 @@ import { mutate } from './mutations';
 const repository = z.string().refine(isProjectRepositoryUrl, 'Use the canonical GitHub owner/repository URL.');
 const approvalSchema = z.object({
   slug: challengeSlug,
+  category: categoryId.optional(),
   githubRepo: repository.optional(),
   autoCreateRepo: z.boolean().optional(),
   trustedCheckName: field(150).optional(),
@@ -129,8 +130,8 @@ projectProposals.post('/api/admin/project-proposals/:id/approve', async (c) => {
       name: precheckProposal.name,
       summary: precheckProposal.summary,
       goal: precheckProposal.goal,
-      scoringMetric: precheckProposal.scoringMetric,
-      acceptanceCriteria: precheckProposal.acceptanceCriteria,
+      scoringMetric: precheckProposal.scoringMetric ?? 'Community milestone & live demo',
+      acceptanceCriteria: precheckProposal.acceptanceCriteria ?? 'Working PR, demo, or experiment note',
       trustedCheckName,
       allowExisting: false,
     });
@@ -141,9 +142,15 @@ projectProposals.post('/api/admin/project-proposals/:id/approve', async (c) => {
     return await mutate(c, principal, async () => {
       const proposal = await pendingProposal(c, proposalId);
       const reviewedAt = iso();
-      const criteria = localized(proposal.acceptanceCriteria);
+      const criteria = localized(proposal.acceptanceCriteria ?? 'Working PR, demo, or experiment note');
+      let resolvedCategory = body.category ?? proposal.category ?? 'challenge';
+      if (!body.category) {
+        const catExists = await sql(db, 'SELECT id FROM challenge_categories WHERE id=?', resolvedCategory).first();
+        if (!catExists) resolvedCategory = 'challenge';
+      }
       const writes = publishChallenge(db, {
         ...body,
+        category: resolvedCategory,
         githubRepo: resolvedGithubRepo,
         trustedCheckName,
         name: proposal.name,
@@ -153,7 +160,7 @@ projectProposals.post('/api/admin/project-proposals/:id/approve', async (c) => {
         summary: localized(proposal.summary),
         background: localized(proposal.summary),
         ultimateGoal: localized(proposal.goal),
-        scoringMetric: localized(proposal.scoringMetric),
+        scoringMetric: localized(proposal.scoringMetric ?? 'Community milestone & live demo'),
         verificationMethod: localized(body.verificationMethod),
         rules: [criteria],
         contributionCriteria: [{

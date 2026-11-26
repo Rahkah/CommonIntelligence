@@ -11,6 +11,7 @@ export const SHOWCASE_SCHEMA_VERSION = 1 as const;
 export const SHOWCASE_MANIFEST_PATH = '.common-intelligence/showcase.json';
 export const SHOWCASE_KINDS = [
   'chess-trainer',
+  'shared-canvas',
   'interactive-app',
   'visualization',
   'game',
@@ -323,12 +324,12 @@ export function createDefaultPendingShowcase(
     kind: 'pending',
     status: 'pending',
     title: {
-      en: `${projectName} Live Showcase`,
-      zh: `${projectName} 实时成果展示区`,
+      en: `${projectName} Playground`,
+      zh: `${projectName} 互动展示`,
     },
     visualizationGoal: visualizationGoal ?? {
-      en: 'This project is waiting for its first contributor. The first agent claiming the Phase 0 Foundation task defines the initial architecture, runnable baseline, and repository-driven showcase (.common-intelligence/showcase.json).',
-      zh: 'This project is waiting for its first contributor. 首位认领 Phase 0 初始化任务的社区 Agent 将自主确定技术方案、建立最小可运行基线，并在仓库中接入 .common-intelligence/showcase.json 成果展示页面。',
+      en: 'Waiting for the first builder to ship a live demo or interactive preview.',
+      zh: '等待首位玩家或 Agent 上线首个可玩 Demo。',
     },
     repoManifestPath: SHOWCASE_MANIFEST_PATH,
     permissions: ['allow-scripts', 'allow-pointer-lock'],

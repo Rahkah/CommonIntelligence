@@ -7,12 +7,12 @@ import { apiClient } from '@/api/client';
 import { useAppState } from '@/stores/appState';
 
 const { t, loc, challengeName, state } = useAppState();
+const L = (en: string, zh: string) => (state.locale === 'zh' ? zh : en);
 
 const events = ref<ActivityEvent[]>([]);
 const loading = ref(true);
 const refreshing = ref(false);
 const autoPoll = ref(true);
-const lastSyncedAt = ref<string>('');
 const selectedType = ref<ActivityEventType | 'ALL'>('ALL');
 
 const EVENT_TYPES: ActivityEventType[] = [
@@ -20,12 +20,25 @@ const EVENT_TYPES: ActivityEventType[] = [
   'task_claimed',
   'task_proposed',
   'pr_submitted',
-  'verification_passed',
-  'verification_failed',
   'contribution_accepted',
   'badge_awarded',
   'record_broken',
 ];
+
+function eventLabel(type: ActivityEventType): string {
+  const map: Record<ActivityEventType, { en: string; zh: string }> = {
+    agent_registered: { en: 'AI Joined', zh: 'AI 入场' },
+    task_claimed: { en: 'Quest Claimed', zh: '认领任务' },
+    task_proposed: { en: 'New Quest', zh: '新任务' },
+    pr_submitted: { en: 'PR Opened', zh: '提交 PR' },
+    verification_passed: { en: 'Check Passed', zh: '通过检查' },
+    verification_failed: { en: 'Check Failed', zh: '未通过' },
+    contribution_accepted: { en: 'Shipped', zh: '已合入' },
+    badge_awarded: { en: 'Badge', zh: '解锁勋章' },
+    record_broken: { en: 'New Record', zh: '破纪录' },
+  };
+  return state.locale === 'zh' ? map[type].zh : map[type].en;
+}
 
 const filteredEvents = computed(() =>
   selectedType.value === 'ALL'
@@ -41,7 +54,6 @@ async function fetchActivity(isManual = false) {
   try {
     const res = await apiClient.listActivity();
     events.value = res.items;
-    lastSyncedAt.value = new Date().toISOString().slice(11, 19) + ' UTC';
   } finally {
     loading.value = false;
     refreshing.value = false;
@@ -55,13 +67,13 @@ function setupPolling() {
   }
   if (autoPoll.value) {
     timer = setInterval(() => {
-      fetchActivity(false);
+      void fetchActivity(false);
     }, pollIntervalMs);
   }
 }
 
 onMounted(() => {
-  fetchActivity(false);
+  void fetchActivity(false);
   setupPolling();
 });
 
@@ -89,12 +101,12 @@ function eventTone(type: ActivityEventType) {
       return 'neutral';
   }
 }
+
 function eventSummary(evt: ActivityEvent): string {
-  if (evt.type === 'agent_registered') {
-    if (state.locale === 'zh') {
-      return evt.selfReportedModel ? `已注册 Agent（${evt.selfReportedModel}）` : '已注册 Agent';
-    }
-    return evt.selfReportedModel ? `Registered agent (${evt.selfReportedModel})` : 'Registered agent';
+  if (evt.type === 'agent_registered' && !loc(evt.summary)) {
+    return evt.selfReportedModel
+      ? L(`Joined with ${evt.selfReportedModel}`, `派出了 ${evt.selfReportedModel}`)
+      : L('Joined with an AI agent', '派出了 AI Agent');
   }
   return loc(evt.summary);
 }
@@ -102,30 +114,28 @@ function eventSummary(evt: ActivityEvent): string {
 
 <template>
   <div class="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-    <div class="flex flex-wrap items-end justify-between gap-4 border-b border-border-light pb-6 dark:border-border-dark">
+    <div class="flex flex-wrap items-end justify-between gap-4 border-b border-border-light pb-5 dark:border-border-dark">
       <div>
         <div class="flex items-center gap-2">
           <Radio class="h-4 w-4 text-accent dark:text-accent-dark" />
-          <h1 class="font-editorial text-3xl font-medium text-ink dark:text-chalk">
+          <h1 class="font-display text-3xl font-bold text-ink dark:text-chalk">
             {{ t.live.title }}
           </h1>
           <StatusPill v-if="state.dataMode === 'demo'" label="DEMO" tone="demo" />
         </div>
-        <p class="mt-2 max-w-2xl text-sm text-ink-muted dark:text-chalk-muted">
+        <p class="mt-1 text-sm text-ink-muted dark:text-chalk-muted">
           {{ t.live.subtitle }}
         </p>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
-        <label
-          class="inline-flex cursor-pointer items-center gap-2 rounded border border-border-light bg-surface px-3 py-1.5 text-xs text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk"
-        >
-          <input v-model="autoPoll" type="checkbox" class="accent-teal-700" />
+      <div class="flex items-center gap-2">
+        <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk">
+          <input v-model="autoPoll" type="checkbox" class="accent-emerald-600" />
           <span>{{ t.live.autoPoll }}</span>
         </label>
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded border border-border-light bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:border-ink/40 dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
+          class="inline-flex items-center gap-1.5 rounded-xl border border-border-light bg-surface px-3 py-1.5 text-xs font-semibold text-ink hover:border-accent dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk cursor-pointer"
           @click="fetchActivity(true)"
         >
           <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': refreshing }" />
@@ -134,21 +144,13 @@ function eventSummary(evt: ActivityEvent): string {
       </div>
     </div>
 
-    <div class="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-ink-faint dark:text-chalk-faint">
-      <span>{{ t.live.pollingNote }}</span>
-      <span v-if="lastSyncedAt" class="font-mono">
-        {{ t.live.lastSynced }}: {{ lastSyncedAt }}
-      </span>
-    </div>
-
-    <!-- Event Type Filter Chips -->
     <div class="mt-5 flex flex-wrap gap-1.5">
       <button
         type="button"
-        class="rounded border px-2.5 py-1 font-mono text-[11px] transition cursor-pointer"
+        class="rounded-lg border px-3 py-1.5 text-xs font-semibold transition cursor-pointer"
         :class="
           selectedType === 'ALL'
-            ? 'border-ink bg-ink text-paper dark:border-chalk dark:bg-chalk dark:text-obsidian'
+            ? 'border-accent bg-accent text-white dark:border-accent-dark dark:bg-accent-dark dark:text-obsidian'
             : 'border-border-light bg-surface text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted'
         "
         @click="selectedType = 'ALL'"
@@ -159,62 +161,53 @@ function eventSummary(evt: ActivityEvent): string {
         v-for="tp in EVENT_TYPES"
         :key="tp"
         type="button"
-        class="rounded border px-2.5 py-1 font-mono text-[11px] transition cursor-pointer"
+        class="rounded-lg border px-3 py-1.5 text-xs font-semibold transition cursor-pointer"
         :class="
           selectedType === tp
-            ? 'border-ink bg-ink text-paper dark:border-chalk dark:bg-chalk dark:text-obsidian'
+            ? 'border-accent bg-accent text-white dark:border-accent-dark dark:bg-accent-dark dark:text-obsidian'
             : 'border-border-light bg-surface text-ink-muted hover:text-ink dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted'
         "
         @click="selectedType = tp"
       >
-        {{ tp }}
+        {{ eventLabel(tp) }}
       </button>
     </div>
 
-    <!-- Chronological Ledger -->
     <div v-if="loading" class="mt-8 text-sm text-ink-muted dark:text-chalk-muted">
       {{ t.common.loading }}
     </div>
 
-    <div
-      v-else-if="filteredEvents.length === 0"
-      class="mt-6 rounded-md border border-border-light bg-surface p-8 text-center text-sm text-ink-muted dark:border-border-dark dark:bg-obsidian-surface dark:text-chalk-muted"
-    >
-      {{ state.locale === 'zh' ? '该事件类型暂无记录。' : 'No events recorded for this filter yet.' }}
+    <div v-else-if="filteredEvents.length === 0" class="project-panel mt-6 text-center text-sm text-ink-muted">
+      {{ L('No events yet.', '暂无动态。') }}
     </div>
 
-    <ol v-else class="mt-6 divide-y divide-border-light rounded-md border border-border-light bg-surface dark:divide-border-dark dark:border-border-dark dark:bg-obsidian-surface">
-      <li v-for="evt in filteredEvents" :key="evt.id" class="p-4 sm:px-5">
+    <ol v-else class="mt-6 space-y-3">
+      <li v-for="evt in filteredEvents" :key="evt.id" class="project-panel space-y-2.5 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <StatusPill :label="evt.type" :tone="eventTone(evt.type)" />
+            <StatusPill :label="eventLabel(evt.type)" :tone="eventTone(evt.type)" :mono="false" />
             <RouterLink
               :to="`/challenges/${evt.challengeSlug}`"
-              class="font-mono text-xs font-medium text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+              class="text-xs font-semibold text-ink hover:text-accent dark:text-chalk dark:hover:text-accent-dark"
             >
               {{ challengeName({ slug: evt.challengeSlug, name: evt.challengeName }) }}
             </RouterLink>
-            <span v-if="evt.taskId" class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              · {{ evt.taskId }}
-            </span>
           </div>
           <time class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-            {{ evt.createdAt.replace('T', ' ').slice(0, 19) }} UTC
+            {{ evt.createdAt.replace('T', ' ').slice(0, 16) }} UTC
           </time>
         </div>
 
-        <p class="mt-2 text-sm leading-relaxed text-ink dark:text-chalk">
-          {{ eventSummary(evt) }}
-        </p>
+        <p class="text-sm text-ink dark:text-chalk">{{ eventSummary(evt) }}</p>
 
-        <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div class="flex flex-wrap items-center gap-2 text-ink-muted dark:text-chalk-muted">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="flex items-center gap-2 text-ink-muted dark:text-chalk-muted">
             <img :src="evt.actorAvatarUrl" :alt="evt.actorUsername" class="h-4 w-4 rounded-sm" />
-            <RouterLink :to="`/u/${evt.actorUsername}`" class="font-mono font-medium text-ink hover:underline dark:text-chalk">
+            <RouterLink :to="`/u/${evt.actorUsername}`" class="font-mono font-semibold text-ink hover:underline dark:text-chalk">
               @{{ evt.actorUsername }}
             </RouterLink>
-            <span v-if="evt.selfReportedModel" class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              ({{ evt.selfReportedModel }} · {{ t.challenge.selfReportedTag }})
+            <span v-if="evt.selfReportedModel" class="rounded bg-subtle px-1.5 py-0.5 font-mono text-[10.5px] dark:bg-obsidian-subtle">
+              {{ evt.selfReportedModel }}
             </span>
           </div>
 
@@ -232,9 +225,9 @@ function eventSummary(evt: ActivityEvent): string {
               :href="evt.prUrl"
               target="_blank"
               rel="noopener noreferrer"
-              class="inline-flex items-center gap-1 font-mono text-[11px] text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+              class="inline-flex items-center gap-1 font-mono text-[11px] text-ink-muted hover:text-ink dark:text-chalk-muted"
             >
-              <span>GitHub PR</span>
+              <span>PR</span>
               <ExternalLink class="h-3 w-3" />
             </a>
           </div>
