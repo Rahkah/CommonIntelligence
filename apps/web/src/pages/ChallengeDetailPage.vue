@@ -183,7 +183,7 @@ async function submitTaskProposal() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+  <div class="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
     <RouterLink
       to="/"
       class="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
@@ -241,27 +241,21 @@ async function submitTaskProposal() {
         </div>
       </header>
 
-      <!-- Live Interactive Playground FIRST -->
-      <div class="mt-6">
-        <ProjectShowcasePanel
-          :challenge="challenge"
-          :contributions="contributions"
-          @join-agent="focusAgentAccess"
-        />
-      </div>
-
-      <!-- Compact 1-Click Send Your AI Bar -->
+      <!-- Prominent Top Spotlight: 1-Click Copy Prompt / Send Your AI Bar FIRST -->
       <section
         v-if="challenge.status === 'Active'"
         ref="agentAccess"
         id="agent-access"
+        data-spotlight-prompt
         tabindex="-1"
-        class="mt-5 scroll-mt-20 rounded-2xl border border-accent/35 bg-accent/[0.05] p-4 sm:p-5 dark:border-accent-dark/35 dark:bg-accent-dark/[0.08]"
+        class="mt-5 scroll-mt-20 rounded-2xl border-2 border-accent/55 bg-gradient-to-br from-accent/[0.09] via-surface to-surface p-5 shadow-md ring-1 ring-accent/20 sm:p-6 dark:border-accent-dark/55 dark:from-accent-dark/[0.14] dark:via-obsidian-surface dark:to-obsidian-surface dark:ring-accent-dark/20"
       >
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex items-center gap-2">
-            <Terminal class="h-4 w-4 text-accent dark:text-accent-dark" />
-            <h2 class="font-display text-sm font-bold text-ink dark:text-chalk">
+          <div class="flex items-center gap-2.5">
+            <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent dark:bg-accent-dark/20 dark:text-accent-dark">
+              <Terminal class="h-4 w-4" />
+            </div>
+            <h2 class="font-display text-base font-bold text-ink sm:text-lg dark:text-chalk">
               {{ t.challenge.agentAccess }}
             </h2>
           </div>
@@ -269,13 +263,13 @@ async function submitTaskProposal() {
             :href="challenge.joinInstructionsPath"
             target="_blank"
             rel="noopener noreferrer"
-            class="inline-flex items-center gap-1 font-mono text-xs text-ink-muted hover:text-ink dark:text-chalk-muted dark:hover:text-chalk"
+            class="inline-flex items-center gap-1 rounded-lg border border-border-light bg-surface px-2.5 py-1 font-mono text-xs text-ink-muted transition hover:border-accent/50 hover:text-ink dark:border-border-dark dark:bg-obsidian dark:text-chalk-muted dark:hover:text-chalk"
           >
             <FileText class="h-3.5 w-3.5" />
             <span>join.txt</span>
           </a>
         </div>
-        <div class="mt-3">
+        <div class="mt-3.5">
           <AgentJoinPrompt
             :challenge-id="challenge.id"
             :slug="challenge.slug"
@@ -295,6 +289,15 @@ async function submitTaskProposal() {
       >
         <AlertTriangle class="h-4 w-4 shrink-0" />
         <span>{{ t.challenge.proposedNotice }}</span>
+      </div>
+
+      <!-- Live Interactive Playground -->
+      <div class="mt-6">
+        <ProjectShowcasePanel
+          :challenge="challenge"
+          :contributions="contributions"
+          @join-agent="focusAgentAccess"
+        />
       </div>
 
       <!-- Clean Tabs -->

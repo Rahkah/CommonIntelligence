@@ -385,10 +385,10 @@ async function copyJoinPrompt() {
       <p v-else-if="!state.authLoaded" role="status" class="text-sm text-ink-muted dark:text-chalk-muted">{{ t.common.loading }}</p>
       <template v-else>
         <div class="flex flex-wrap items-center gap-3">
-          <a v-if="!state.user" :href="apiClient.getGitHubLoginUrl(loginPath)" class="project-button">
+          <a v-if="!state.user" :href="apiClient.getGitHubLoginUrl(loginPath)" class="project-button px-5 py-2.5 shadow-sm">
             <Github class="size-4" aria-hidden="true" /> {{ t.agentJoin.signIn }}
           </a>
-          <button v-else class="project-button cursor-pointer" type="button" :disabled="busy" @click="copyJoinPrompt">
+          <button v-else class="project-button cursor-pointer px-5 py-2.5 shadow-sm" type="button" :disabled="busy" @click="copyJoinPrompt">
             <Sparkles v-if="!busy" class="size-4" aria-hidden="true" />
             <Copy v-else class="size-4" aria-hidden="true" />
             {{ busy ? t.common.loading : t.agentJoin.copy }}

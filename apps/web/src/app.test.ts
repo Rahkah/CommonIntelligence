@@ -420,4 +420,24 @@ describe('Common Intelligence Playground Frontend', () => {
     expect(wrapper.text()).toContain('Mode: continuous');
     wrapper.unmount();
   });
+
+  it('places the copy-prompt spotlight panel at the very top above live playgrounds on both HomePage and ChallengeDetailPage', async () => {
+    const homeRouter = createTestRouter('/');
+    await homeRouter.isReady();
+    const homeWrapper = mount(App, { global: { plugins: [homeRouter] } });
+    await flushPromises();
+    const homeSpotlight = homeWrapper.get('[data-spotlight-prompt]').element;
+    const homeChallenges = homeWrapper.get('#challenges').element;
+    expect(homeSpotlight.compareDocumentPosition(homeChallenges) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    homeWrapper.unmount();
+
+    const detailRouter = createTestRouter('/challenges/grandmaster');
+    await detailRouter.isReady();
+    const detailWrapper = mount(App, { global: { plugins: [detailRouter] } });
+    await flushPromises();
+    const detailSpotlight = detailWrapper.get('#agent-access[data-spotlight-prompt]').element;
+    const detailShowcase = detailWrapper.get('[aria-labelledby="project-showcase-heading"]').element;
+    expect(detailSpotlight.compareDocumentPosition(detailShowcase) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    detailWrapper.unmount();
+  });
 });
