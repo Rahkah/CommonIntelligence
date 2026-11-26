@@ -10,6 +10,10 @@ export const agents = `SELECT a.id,a.owner_github_id ownerGithubId,u.username ow
   a.self_reported_model selfReportedModel,a.self_reported_client selfReportedClient,a.registered_at registeredAt,
   a.last_heartbeat_at lastHeartbeatAt FROM agents a JOIN users u ON u.github_id=a.owner_github_id`;
 
+export const publicAgents = `SELECT a.id,a.owner_github_id ownerGithubId,u.username ownerUsername,
+  a.self_reported_model selfReportedModel,a.self_reported_client selfReportedClient,a.registered_at registeredAt,
+  a.last_heartbeat_at lastHeartbeatAt FROM agents a JOIN users u ON u.github_id=a.owner_github_id`;
+
 export const tokens = `SELECT id,name,token_prefix tokenPrefix,scopes_json scopesJson,max_concurrent_tasks maxConcurrentTasks,
   max_total_tasks maxTotalTasks,tasks_claimed_count tasksClaimedCount,budget_note budgetNote,created_at createdAt,
   expires_at expiresAt,last_used_at lastUsedAt,revoked_at revokedAt,
@@ -19,17 +23,16 @@ export const tokens = `SELECT id,name,token_prefix tokenPrefix,scopes_json scope
 export const tasks = `SELECT t.task_id taskId,t.challenge_id challengeId,t.title_json titleJson,t.description_json descriptionJson,
   t.task_type taskType,t.priority,t.status,(SELECT json_group_array(depends_on_task_id) FROM task_dependencies WHERE task_id=t.task_id) dependenciesJson,
   t.required_capabilities_json requiredCapabilitiesJson,t.acceptance_criteria_json acceptanceCriteriaJson,t.input_artifacts_json inputArtifactsJson,
-  t.output_requirements_json outputRequirementsJson,t.assigned_agent_id assignedAgentId,a.label assignedAgentLabel,
+  t.output_requirements_json outputRequirementsJson,t.assigned_agent_id assignedAgentId,
   a.self_reported_model assignedAgentModelSelfReported,u.username assignedUserUsername,u.avatar_url assignedUserAvatarUrl,
   coalesce(t.proposed_by_github_id,pa.owner_github_id) proposedByGithubId,
   coalesce(pu.username,pau.username) proposedByUsername,
   coalesce(pu.avatar_url,pau.avatar_url) proposedByAvatarUrl,
-  pa.id proposedByAgentId,pa.label proposedByAgentLabel,pa.self_reported_model proposedByAgentModelSelfReported,
+  pa.id proposedByAgentId,pa.self_reported_model proposedByAgentModelSelfReported,
   coalesce(c.contributor_github_id,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN a.owner_github_id END) completedByGithubId,
   coalesce(cu.username,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN u.username END) completedByUsername,
   coalesce(cu.avatar_url,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN u.avatar_url END) completedByAvatarUrl,
-  coalesce(CASE WHEN t.status='Accepted' THEN a.label END,(SELECT ag.label FROM task_attempts ta JOIN agents ag ON ag.id=ta.agent_id WHERE ta.task_id=t.task_id AND ta.outcome='accepted' ORDER BY ta.created_at DESC LIMIT 1)) completedByAgentLabel,
-  coalesce(c.self_reported_agent_model,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN a.self_reported_model END) completedByAgentModelSelfReported,
+  coalesce(c.self_reported_agent_model,CASE WHEN t.status='Accepted' THEN a.self_reported_model END,(SELECT ag.self_reported_model FROM task_attempts ta JOIN agents ag ON ag.id=ta.agent_id WHERE ta.task_id=t.task_id AND ta.outcome='accepted' ORDER BY ta.created_at DESC LIMIT 1)) completedByAgentModelSelfReported,
   coalesce(c.accepted_at,CASE WHEN t.is_planning=1 AND t.status='Accepted' THEN t.updated_at END) completedAt,
   c.id contributionId,cr.id credentialId,
   t.lease_expires_at leaseExpiresAt,
@@ -76,7 +79,14 @@ export const credentials = `SELECT cr.id,cr.status,cr.status_note_json statusNot
   JOIN contributions v ON v.id=c.id`;
 
 export const activity = `SELECT e.id,e.event_type type,h.slug challengeSlug,h.id challengeId,h.name challengeName,u.username actorUsername,
-  u.github_id actorGithubId,u.avatar_url actorAvatarUrl,a.label agentLabel,a.self_reported_model selfReportedModel,e.summary_json summaryJson,
+  u.github_id actorGithubId,u.avatar_url actorAvatarUrl,a.self_reported_model selfReportedModel,
+  CASE WHEN e.event_type='agent_registered'
+    THEN json_object(
+      'en',CASE WHEN a.self_reported_model IS NOT NULL AND trim(a.self_reported_model)!='' THEN 'Registered agent ('||a.self_reported_model||')' ELSE 'Registered agent' END,
+      'zh',CASE WHEN a.self_reported_model IS NOT NULL AND trim(a.self_reported_model)!='' THEN '已注册 Agent（'||a.self_reported_model||'）' ELSE '已注册 Agent' END
+    )
+    ELSE e.summary_json
+  END summaryJson,
   e.task_id taskId,p.pr_url prUrl,e.credential_id credentialId,e.badge_code badgeCode,e.created_at createdAt FROM activity_events e
   JOIN challenges h ON h.id=e.challenge_id JOIN users u ON u.github_id=e.actor_github_id LEFT JOIN agents a ON a.id=e.agent_id
   LEFT JOIN pull_requests p ON p.id=e.pull_request_id`;

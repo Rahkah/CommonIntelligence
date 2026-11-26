@@ -1057,3 +1057,64 @@ it('automates public GitHub repo creation, ownership notice, webhook setup, batc
     env.ADMIN_IP_ALLOWLIST = prevAllowlist;
   }
 }, 20000);
+
+it('hides agent machine labels from public tasks, activity, and agent lookup endpoints while keeping model names', async () => {
+  const operator = await login();
+  const minted = await ok(
+    request('/api/agent-tokens', {
+      headers: operator.headers,
+      body: {
+        name: 'privacy-token',
+        expiresInDays: 1,
+        maxConcurrentTasks: 2,
+        maxTotalTasks: 10,
+        scopes: ['agent:register', 'tasks:claim', 'tasks:propose', 'tasks:read', 'knowledge:read'],
+      },
+    }),
+    201
+  );
+  const headers = { Authorization: 'Bearer ' + minted.plaintextToken };
+  const registered = await ok(
+    request('/api/agents/register', {
+      headers,
+      body: {
+        challengeId: 'grandmaster',
+        label: 'Bleap-Pro',
+        selfReportedModel: 'AWS Quick (Smart mode)',
+        selfReportedClient: 'custom',
+      },
+    }),
+    201
+  );
+  const claimed = await ok(claim({ id: registered.id, headers }, 'grandmaster'));
+
+  // Simulate a pre-existing legacy DB event whose summary_json stored the machine hostname
+  await query(
+    `UPDATE activity_events SET summary_json=? WHERE event_type='agent_registered' AND agent_id=?`,
+    JSON.stringify({ en: 'Registered Bleap-Pro', zh: 'Registered Bleap-Pro' }),
+    registered.id
+  ).run();
+
+  const [publicAgent, taskDetail, activityList] = await Promise.all([
+    ok(request('/api/agents/' + registered.id)),
+    ok(request('/api/tasks/' + claimed.taskId)),
+    ok(request('/api/activity?challengeId=grandmaster&limit=20')),
+  ]);
+
+  expect(publicAgent.selfReportedModel).toBe('AWS Quick (Smart mode)');
+  expect(publicAgent.label).toBeUndefined();
+  expect(JSON.stringify(publicAgent)).not.toContain('Bleap-Pro');
+
+  expect(taskDetail.assignedAgentModelSelfReported).toBe('AWS Quick (Smart mode)');
+  expect(taskDetail.assignedAgentLabel).toBeUndefined();
+  expect(JSON.stringify(taskDetail)).not.toContain('Bleap-Pro');
+
+  const regEvent = activityList.items.find(
+    (e) => e.type === 'agent_registered' && e.actorGithubId === String(operator.uid)
+  );
+  expect(regEvent).toBeTruthy();
+  expect(regEvent.selfReportedModel).toBe('AWS Quick (Smart mode)');
+  expect(regEvent.agentLabel).toBeUndefined();
+  expect(regEvent.summary.en).toContain('AWS Quick (Smart mode)');
+  expect(JSON.stringify(activityList.items)).not.toContain('Bleap-Pro');
+});

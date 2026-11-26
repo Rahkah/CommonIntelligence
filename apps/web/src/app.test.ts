@@ -234,6 +234,11 @@ describe('Common Intelligence Frontend MVP', () => {
       const wrapper = mount(App, { global: { plugins: [router] } });
       await flushPromises();
       expect(wrapper.text()).toContain(expected);
+      if (path === '/live') {
+        expect(wrapper.text()).toContain('gemini-2.5-pro');
+        expect(wrapper.text()).not.toContain('sprt-auditor-jp');
+        expect(wrapper.text()).not.toContain('local-qwen-runner');
+      }
       if (path === '/docs') {
         expect(wrapper.find('a[href="/challenges/grandmaster/join.txt"]').exists()).toBe(true);
         expect(wrapper.find('#governance, #protocol, #security, a[href="/docs#governance"]').exists()).toBe(false);
@@ -321,14 +326,16 @@ describe('Common Intelligence Frontend MVP', () => {
 
     const decompText = wrapper.text();
     expect(decompText).toContain('@elena-rostova-demo');
-    expect(decompText).toContain('grandmaster-planner-01');
+    expect(decompText).toContain('claude-sonnet-4.5');
+    expect(decompText).not.toContain('grandmaster-planner-01');
     expect(decompText).toContain('TASK-GM-001');
     expect(decompText).toContain('TASK-GM-002');
     expect(decompText).toContain('@kenji-takahashi-demo');
-    expect(decompText).toContain('sprt-auditor-jp');
+    expect(decompText).toContain('gemini-2.5-pro');
+    expect(decompText).not.toContain('sprt-auditor-jp');
     expect(decompText).toContain('TASK-GM-005');
 
-    // Switch to Contributor Tasks tab: shows what tasks each contributor completed
+    // Switch to Contributor Tasks tab: shows what tasks each contributor completed (model only, never agent label)
     const contribTab = wrapper.findAll('button[role="tab"]').find((b) => b.text().includes('Contributor Tasks'));
     expect(contribTab).toBeDefined();
     await contribTab!.trigger('click');
@@ -339,6 +346,10 @@ describe('Common Intelligence Frontend MVP', () => {
     expect(contribText).toContain('TASK-GM-001');
     expect(contribText).toContain('Tasks Completed by @mateo-silva-demo');
     expect(contribText).toContain('TASK-GM-008');
+    expect(contribText).not.toContain('grandmaster-planner-01');
+    expect(contribText).not.toContain('grandmaster-trainer-01');
+    expect(contribText).not.toContain('sprt-auditor-jp');
+    expect(contribText).not.toContain('nnue-kernel-smith');
 
     // Switch to Chinese locale and verify bilingual labels
     const langBtn = wrapper.findAll('button').find((b) => b.text().includes('EN / 中'));

@@ -76,11 +76,9 @@ const contributionsByTaskId = computed(() => {
 interface EnrichedTask extends Task {
   plannerUsername: string | null;
   plannerAvatarUrl: string | null;
-  plannerAgentLabel: string | null;
   plannerAgentModel: string | null;
   completerUsername: string | null;
   completerAvatarUrl: string | null;
-  completerAgentLabel: string | null;
   completerAgentModel: string | null;
   effectiveCompletedAt: string | null;
   effectiveCredentialId: string | null;
@@ -118,12 +116,6 @@ const enrichedTasks = computed<EnrichedTask[]>(() => {
       parentPlan?.completedByAvatarUrl ??
       parentPlan?.assignedUserAvatarUrl ??
       null;
-    const plannerAgentLabel =
-      tk.proposedByAgentLabel ??
-      (tk.isPlanning ? tk.completedByAgentLabel ?? tk.assignedAgentLabel ?? null : null) ??
-      parentPlan?.completedByAgentLabel ??
-      parentPlan?.assignedAgentLabel ??
-      null;
     const plannerAgentModel =
       tk.proposedByAgentModelSelfReported ??
       (tk.isPlanning
@@ -146,9 +138,6 @@ const enrichedTasks = computed<EnrichedTask[]>(() => {
         tk.assignedUserAvatarUrl ??
         null
       : null;
-    const completerAgentLabel = isDone
-      ? tk.completedByAgentLabel ?? tk.assignedAgentLabel ?? null
-      : null;
     const completerAgentModel = isDone
       ? tk.completedByAgentModelSelfReported ??
         matchedContribution?.selfReportedAgentModel ??
@@ -160,11 +149,9 @@ const enrichedTasks = computed<EnrichedTask[]>(() => {
       ...tk,
       plannerUsername,
       plannerAvatarUrl,
-      plannerAgentLabel,
       plannerAgentModel,
       completerUsername,
       completerAvatarUrl,
-      completerAgentLabel,
       completerAgentModel,
       effectiveCompletedAt: isDone
         ? tk.completedAt ?? matchedContribution?.acceptedAt ?? tk.updatedAt
@@ -183,7 +170,7 @@ const enrichedById = computed(() => new Map(enrichedTasks.value.map((tk) => [tk.
 interface ContributorScheduleSummary {
   username: string;
   avatarUrl: string | null;
-  agents: Array<{ label: string; model: string | null }>;
+  agentModels: string[];
   planningTasks: EnrichedTask[];
   decomposedSubtasks: EnrichedTask[];
   completedTasks: EnrichedTask[];
@@ -197,7 +184,7 @@ const contributorSummaries = computed<ContributorScheduleSummary[]>(() => {
     {
       username: string;
       avatarUrl: string | null;
-      agentKeys: Map<string, { label: string; model: string | null }>;
+      agentModels: Set<string>;
       planningTasks: EnrichedTask[];
       decomposedSubtasks: EnrichedTask[];
       completedTasks: EnrichedTask[];
@@ -212,7 +199,7 @@ const contributorSummaries = computed<ContributorScheduleSummary[]>(() => {
       entry = {
         username,
         avatarUrl: avatarUrl ?? null,
-        agentKeys: new Map(),
+        agentModels: new Set(),
         planningTasks: [],
         decomposedSubtasks: [],
         completedTasks: [],
@@ -226,38 +213,29 @@ const contributorSummaries = computed<ContributorScheduleSummary[]>(() => {
     return entry;
   }
 
-  function recordAgent(
-    entry: ReturnType<typeof ensure>,
-    label?: string | null,
-    model?: string | null
-  ) {
-    if (!label && !model) return;
-    const key = `${label ?? ''}::${model ?? ''}`;
-    if (!entry.agentKeys.has(key)) {
-      entry.agentKeys.set(key, {
-        label: label ?? (state.locale === 'zh' ? '未命名 Agent' : 'Agent'),
-        model: model ?? null,
-      });
-    }
+  function recordAgentModel(entry: ReturnType<typeof ensure>, model?: string | null) {
+    const trimmed = model?.trim();
+    if (!trimmed) return;
+    entry.agentModels.add(trimmed);
   }
 
   for (const tk of enrichedTasks.value) {
     if (tk.isPlanning && tk.plannerUsername) {
       const entry = ensure(tk.plannerUsername, tk.plannerAvatarUrl);
       entry.planningTasks.push(tk);
-      recordAgent(entry, tk.plannerAgentLabel, tk.plannerAgentModel);
+      recordAgentModel(entry, tk.plannerAgentModel);
     }
 
     if (!tk.isPlanning && tk.plannerUsername) {
       const entry = ensure(tk.plannerUsername, tk.plannerAvatarUrl);
       entry.decomposedSubtasks.push(tk);
-      recordAgent(entry, tk.plannerAgentLabel, tk.plannerAgentModel);
+      recordAgentModel(entry, tk.plannerAgentModel);
     }
 
     if (tk.status === 'Accepted' && tk.completerUsername) {
       const entry = ensure(tk.completerUsername, tk.completerAvatarUrl);
       entry.completedTasks.push(tk);
-      recordAgent(entry, tk.completerAgentLabel, tk.completerAgentModel);
+      recordAgentModel(entry, tk.completerAgentModel);
     }
 
     if (
@@ -266,14 +244,14 @@ const contributorSummaries = computed<ContributorScheduleSummary[]>(() => {
     ) {
       const entry = ensure(tk.assignedUserUsername, tk.assignedUserAvatarUrl);
       entry.activeTasks.push(tk);
-      recordAgent(entry, tk.assignedAgentLabel, tk.assignedAgentModelSelfReported);
+      recordAgentModel(entry, tk.assignedAgentModelSelfReported);
     }
   }
 
   // Also capture verified contributions not already represented by a completed task for the same contributor
   for (const contrib of props.contributions) {
     const entry = ensure(contrib.contributorUsername, contrib.contributorAvatarUrl);
-    recordAgent(entry, null, contrib.selfReportedAgentModel);
+    recordAgentModel(entry, contrib.selfReportedAgentModel);
     const alreadyCovered = entry.completedTasks.some(
       (tk) => tk.effectiveContributionId === contrib.id || tk.taskId === contrib.taskId
     );
@@ -286,7 +264,7 @@ const contributorSummaries = computed<ContributorScheduleSummary[]>(() => {
     .map((e) => ({
       username: e.username,
       avatarUrl: e.avatarUrl,
-      agents: Array.from(e.agentKeys.values()),
+      agentModels: Array.from(e.agentModels),
       planningTasks: e.planningTasks,
       decomposedSubtasks: e.decomposedSubtasks,
       completedTasks: e.completedTasks,
@@ -340,13 +318,10 @@ function taskMatchesSearch(tk: EnrichedTask, q: string): boolean {
     tk.description.zh,
     tk.taskType,
     tk.plannerUsername ?? '',
-    tk.plannerAgentLabel ?? '',
     tk.plannerAgentModel ?? '',
     tk.completerUsername ?? '',
-    tk.completerAgentLabel ?? '',
     tk.completerAgentModel ?? '',
     tk.assignedUserUsername ?? '',
-    tk.assignedAgentLabel ?? '',
     tk.assignedAgentModelSelfReported ?? '',
   ]
     .join(' ')
@@ -454,7 +429,6 @@ interface DecompositionGroup {
   planTask: EnrichedTask | null;
   plannerUsername: string;
   plannerAvatarUrl: string | null;
-  agentLabel: string | null;
   agentModel: string | null;
   challengeId: string;
   createdAt: string;
@@ -489,7 +463,6 @@ const decompositionGroups = computed<DecompositionGroup[]>(() => {
         plan.plannerUsername ?? plan.completerUsername ?? plan.assignedUserUsername ?? 'unknown',
       plannerAvatarUrl:
         plan.plannerAvatarUrl ?? plan.completerAvatarUrl ?? plan.assignedUserAvatarUrl ?? null,
-      agentLabel: plan.plannerAgentLabel ?? plan.completerAgentLabel ?? plan.assignedAgentLabel ?? null,
       agentModel:
         plan.plannerAgentModel ??
         plan.completerAgentModel ??
@@ -512,7 +485,7 @@ const decompositionGroups = computed<DecompositionGroup[]>(() => {
   for (const tk of filteredTasks.value) {
     if (tk.isPlanning || claimedChildIds.has(tk.taskId)) continue;
     if (!tk.plannerUsername) continue;
-    const key = `${tk.challengeId}::${tk.plannerUsername}::${tk.plannerAgentLabel ?? 'direct'}`;
+    const key = `${tk.challengeId}::${tk.plannerUsername}::${tk.plannerAgentModel ?? 'direct'}`;
     const list = standaloneByPlanner.get(key) ?? [];
     list.push(tk);
     standaloneByPlanner.set(key, list);
@@ -526,7 +499,6 @@ const decompositionGroups = computed<DecompositionGroup[]>(() => {
       planTask: null,
       plannerUsername: first.plannerUsername!,
       plannerAvatarUrl: first.plannerAvatarUrl,
-      agentLabel: first.plannerAgentLabel,
       agentModel: first.plannerAgentModel,
       challengeId: first.challengeId,
       createdAt: first.createdAt,
@@ -554,7 +526,7 @@ const filteredContributorSummaries = computed(() => {
     }
     if (!q) return true;
     if (item.username.toLowerCase().includes(q)) return true;
-    if (item.agents.some((a) => `${a.label} ${a.model ?? ''}`.toLowerCase().includes(q))) {
+    if (item.agentModels.some((model) => model.toLowerCase().includes(q))) {
       return true;
     }
     return [
@@ -1277,13 +1249,12 @@ function focusContributor(username: string) {
                     </span>
                   </div>
                   <div
-                    v-if="selectedTask.plannerAgentLabel || selectedTask.plannerAgentModel"
+                    v-if="selectedTask.plannerAgentModel"
                     class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ink-muted dark:text-chalk-muted"
                   >
                     <Bot class="h-3 w-3" />
-                    <span v-if="selectedTask.plannerAgentLabel">{{ selectedTask.plannerAgentLabel }}</span>
-                    <span v-if="selectedTask.plannerAgentModel">
-                      ({{ selectedTask.plannerAgentModel }} · {{ t.challenge.selfReportedTag }})
+                    <span>
+                      {{ selectedTask.plannerAgentModel }} · {{ t.challenge.selfReportedTag }}
                     </span>
                   </div>
                 </div>
@@ -1329,13 +1300,12 @@ function focusContributor(username: string) {
                     <span>{{ state.locale === 'zh' ? ' 的 Agent 拆解生成' : `'s agent` }}</span>
                   </div>
                   <div
-                    v-if="selectedTask.plannerAgentLabel || selectedTask.plannerAgentModel"
+                    v-if="selectedTask.plannerAgentModel"
                     class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ink-muted dark:text-chalk-muted"
                   >
                     <Bot class="h-3 w-3" />
-                    <span v-if="selectedTask.plannerAgentLabel">{{ selectedTask.plannerAgentLabel }}</span>
-                    <span v-if="selectedTask.plannerAgentModel">
-                      ({{ selectedTask.plannerAgentModel }})
+                    <span>
+                      {{ selectedTask.plannerAgentModel }} · {{ t.challenge.selfReportedTag }}
                     </span>
                   </div>
                 </div>
@@ -1388,12 +1358,11 @@ function focusContributor(username: string) {
                   </div>
                   <div class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
                     <CheckCircle2 class="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                    <span v-if="selectedTask.completerAgentLabel">{{ selectedTask.completerAgentLabel }}</span>
                     <span v-if="selectedTask.completerAgentModel">
-                      ({{ selectedTask.completerAgentModel }})
+                      {{ selectedTask.completerAgentModel }}
                     </span>
                     <span v-if="selectedTask.effectiveCompletedAt">
-                      · {{ selectedTask.effectiveCompletedAt.slice(0, 10) }}
+                      <template v-if="selectedTask.completerAgentModel">· </template>{{ selectedTask.effectiveCompletedAt.slice(0, 10) }}
                     </span>
                   </div>
                 </div>
@@ -1435,12 +1404,11 @@ function focusContributor(username: string) {
                   </div>
                   <div class="mt-0.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
                     <Clock class="h-3 w-3 text-sky-600 dark:text-sky-400" />
-                    <span v-if="selectedTask.assignedAgentLabel">{{ selectedTask.assignedAgentLabel }}</span>
                     <span v-if="selectedTask.assignedAgentModelSelfReported">
-                      ({{ selectedTask.assignedAgentModelSelfReported }})
+                      {{ selectedTask.assignedAgentModelSelfReported }}
                     </span>
                     <span v-if="selectedTask.leaseExpiresAt">
-                      · lease until {{ selectedTask.leaseExpiresAt.slice(0, 16).replace('T', ' ') }}Z
+                      <template v-if="selectedTask.assignedAgentModelSelfReported">· </template>lease until {{ selectedTask.leaseExpiresAt.slice(0, 16).replace('T', ' ') }}Z
                     </span>
                   </div>
                 </div>
@@ -1516,14 +1484,14 @@ function focusContributor(username: string) {
               </div>
 
               <div class="flex flex-wrap items-center gap-2 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-                <span v-if="group.agentLabel" class="inline-flex items-center gap-1 rounded bg-subtle px-1.5 py-0.5 text-ink dark:bg-obsidian-subtle dark:text-chalk">
+                <span
+                  v-if="group.agentModel"
+                  class="inline-flex items-center gap-1 rounded bg-subtle px-1.5 py-0.5 text-ink dark:bg-obsidian-subtle dark:text-chalk"
+                >
                   <Bot class="h-3 w-3 text-accent dark:text-accent-dark" />
-                  {{ group.agentLabel }}
-                </span>
-                <span v-if="group.agentModel">
                   {{ group.agentModel }} ({{ t.challenge.selfReportedTag }})
                 </span>
-                <span v-if="group.planTask">· {{ group.planTask.taskId }}</span>
+                <span v-if="group.planTask"><template v-if="group.agentModel">· </template>{{ group.planTask.taskId }}</span>
                 <span v-if="showChallengeBadge">· {{ challengeDisplay(group.challengeId) }}</span>
               </div>
 
@@ -1695,13 +1663,12 @@ function focusContributor(username: string) {
                   @{{ person.username }}
                 </RouterLink>
                 <span
-                  v-for="ag in person.agents"
-                  :key="`${ag.label}-${ag.model}`"
+                  v-for="model in person.agentModels"
+                  :key="model"
                   class="inline-flex items-center gap-1 rounded border border-border-light bg-subtle px-2 py-0.5 font-mono text-[10.5px] text-ink-muted dark:border-border-dark dark:bg-obsidian-subtle dark:text-chalk-muted"
                 >
                   <Bot class="h-3 w-3 text-accent dark:text-accent-dark" />
-                  <span>{{ ag.label }}</span>
-                  <span v-if="ag.model" class="text-ink-faint dark:text-chalk-faint">· {{ ag.model }}</span>
+                  <span>{{ model }}</span>
                 </span>
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-3 text-xs text-ink-muted dark:text-chalk-muted">
@@ -1790,9 +1757,8 @@ function focusContributor(username: string) {
                   {{ loc(tk.title) }}
                 </div>
                 <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-muted dark:text-chalk-muted">
-                  <span class="font-mono">
-                    <span v-if="tk.completerAgentLabel">{{ tk.completerAgentLabel }}</span>
-                    <span v-if="tk.completerAgentModel"> ({{ tk.completerAgentModel }})</span>
+                  <span v-if="tk.completerAgentModel" class="font-mono">
+                    {{ tk.completerAgentModel }}
                   </span>
                   <div class="flex items-center gap-2.5">
                     <RouterLink
@@ -1920,8 +1886,8 @@ function focusContributor(username: string) {
                     {{ loc(sub.title) }}
                   </div>
                   <div class="mt-1.5 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] text-ink-muted dark:text-chalk-muted">
-                    <span v-if="sub.plannerAgentLabel">
-                      via {{ sub.plannerAgentLabel }}
+                    <span v-if="sub.plannerAgentModel">
+                      {{ sub.plannerAgentModel }}
                     </span>
                     <span
                       v-if="sub.status === 'Accepted' && sub.completerUsername"

@@ -89,6 +89,15 @@ function eventTone(type: ActivityEventType) {
       return 'neutral';
   }
 }
+function eventSummary(evt: ActivityEvent): string {
+  if (evt.type === 'agent_registered') {
+    if (state.locale === 'zh') {
+      return evt.selfReportedModel ? `已注册 Agent（${evt.selfReportedModel}）` : '已注册 Agent';
+    }
+    return evt.selfReportedModel ? `Registered agent (${evt.selfReportedModel})` : 'Registered agent';
+  }
+  return loc(evt.summary);
+}
 </script>
 
 <template>
@@ -195,7 +204,7 @@ function eventTone(type: ActivityEventType) {
         </div>
 
         <p class="mt-2 text-sm leading-relaxed text-ink dark:text-chalk">
-          {{ loc(evt.summary) }}
+          {{ eventSummary(evt) }}
         </p>
 
         <div class="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -204,9 +213,6 @@ function eventTone(type: ActivityEventType) {
             <RouterLink :to="`/u/${evt.actorUsername}`" class="font-mono font-medium text-ink hover:underline dark:text-chalk">
               @{{ evt.actorUsername }}
             </RouterLink>
-            <span v-if="evt.agentLabel" class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
-              via {{ evt.agentLabel }}
-            </span>
             <span v-if="evt.selfReportedModel" class="font-mono text-[11px] text-ink-faint dark:text-chalk-faint">
               ({{ evt.selfReportedModel }} · {{ t.challenge.selfReportedTag }})
             </span>

@@ -7,7 +7,7 @@ import type {
   AgentTokenScope,
   UserProfileSummary,
 } from '@common-intelligence/shared';
-import { agents, users, tokens } from './selects';
+import { agents, publicAgents, users, tokens } from './selects';
 import {
   type App,
   type Ctx,
@@ -386,11 +386,11 @@ auth.post('/api/agents/register', async (c) => {
   if (b.challengeId)
     writes.push(
       guard(db, 'NOT_FOUND', 'EXISTS(SELECT 1 FROM challenges WHERE id=?)', b.challengeId),
-      event(db, 'agent_registered', b.challengeId, p.owner, 'Registered ' + b.label, null, aid)
+      event(db, 'agent_registered', b.challengeId, p.owner, 'Registered agent (' + b.selfReportedModel + ')', null, aid)
     );
   await db.batch(writes);
   return c.json(await one<AgentRecord>(db, agents + ' WHERE a.id=?', aid), 201);
 });
 auth.get('/api/agents/:id', async (c) =>
-  c.json(await one<AgentRecord>(c.env.DB, agents + ' WHERE a.id=?', c.req.param('id')))
+  c.json(await one<Omit<AgentRecord, 'label'>>(c.env.DB, publicAgents + ' WHERE a.id=?', c.req.param('id')))
 );
